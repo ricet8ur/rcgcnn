@@ -93,3 +93,9 @@ Local
 
 # .DS_Store
 .DS_Store
+
+
+# many files
+**/props
+# large files
+**/*.bin

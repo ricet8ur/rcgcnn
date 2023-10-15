@@ -320,8 +320,14 @@ class CIFData(Dataset):
     @functools.lru_cache(maxsize=None)  # Cache loaded structures
     def __getitem__(self, idx):
         cif_id, target = self.id_prop_data[idx]
-        crystal = Structure.from_file(os.path.join(self.root_dir,
-                                                   cif_id+'.cif'))
+        from pymatgen.io.cif import CifParser
+        import ormsgpack as mp
+        # crystal = Structure.from_file(os.path.join(self.root_dir,
+                                                #    cif_id+'.cif'))
+        if not hasattr(self,'cifs'):
+            with open(os.path.join(self.root_dir,'cifs.bin'),'rb') as f:
+                self.cifs = mp.unpackb(f.read(),option=mp.OPT_NON_STR_KEYS)
+        crystal = Structure.from_dict(self.cifs[cif_id])
         atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
                               for i in range(len(crystal))])
         atom_fea = torch.Tensor(atom_fea)
