@@ -150,6 +150,10 @@ def collate_pool(dataset_list):
         torch.stack(batch_target, dim=0),\
         batch_cif_ids
 
+import numba as nb
+@nb.njit
+def _expand(self_filter:np.ndarray, self_var:float, distances:np.ndarray):
+    return np.exp(-(distances[..., np.newaxis] - self_filter)**2 / self_var**2)
 
 class GaussianDistance(object):
     """
@@ -192,8 +196,7 @@ class GaussianDistance(object):
           Expanded distance matrix with the last dimension of length
           len(self.filter)
         """
-        return np.exp(-(distances[..., np.newaxis] - self.filter)**2 /
-                      self.var**2)
+        return _expand(self.filter,self.var,distances)
 
 
 class AtomInitializer(object):

@@ -9,4 +9,4 @@ pip install ipykernel pymatgen==2023.10.4 mp_api scikit-learn ormsgpack zstandar
 ```
 
 Pymatgen newer version prints too many warnings during cif read. + For some reason prints len of cif structures for every structure...
-Ormsgpack needed to replace ~40k cif files with one.
+Ormsgpack needed to replace ~40k .cif files with one .bin.
