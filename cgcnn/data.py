@@ -196,7 +196,10 @@ class GaussianDistance(object):
           Expanded distance matrix with the last dimension of length
           len(self.filter)
         """
-        return _expand(self.filter,self.var,distances)
+        return np.exp(-(distances[..., np.newaxis] - self.filter)**2 /
+                      self.var**2)
+        # faster:
+        # return _expand(self.filter,self.var,distances)
 
 
 class AtomInitializer(object):
@@ -424,17 +427,19 @@ class CIFData(Dataset):
         cif_id, target = self.id_prop_data[idx]
         from pymatgen.io.cif import CifParser
         import ormsgpack as mp
-        # crystal = Structure.from_file(os.path.join(self.root_dir,
-                                                #    cif_id+'.cif'))
-        if not hasattr(self,'cifs'):
-            with open(os.path.join(self.root_dir,'cifs.bin'),'rb') as f:
-                self.cifs = mp.unpackb(f.read(),option=mp.OPT_NON_STR_KEYS)
-        crystal = Structure.from_dict(self.cifs[cif_id])
+        crystal = Structure.from_file(os.path.join(self.root_dir,
+                                               cif_id+'.cif'))
+        # faster:
+        # if not hasattr(self,'cifs'):
+        #     with open(os.path.join(self.root_dir,'cifs.bin'),'rb') as f:
+        #         self.cifs = mp.unpackb(f.read(),option=mp.OPT_NON_STR_KEYS)
+        # crystal = Structure.from_dict(self.cifs[cif_id])
         atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
                               for i in range(len(crystal))])
         atom_fea = torch.Tensor(atom_fea)
-        all_nbrs = get_all_neighbors(crystal, self.radius, include_index=True)
-        # all_nbrs = crystal.get_all_neighbors(self.radius, include_index=True)
+        # faster
+        # all_nbrs = get_all_neighbors(crystal, self.radius, include_index=True)
+        all_nbrs = crystal.get_all_neighbors(self.radius, include_index=True)
         all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
         nbr_fea_idx, nbr_fea = [], []
         for nbr in all_nbrs:
@@ -450,7 +455,6 @@ class CIFData(Dataset):
             else:
                 nbr_fea_idx.append(list(map(lambda x: x[2],
                                             nbr[:self.max_num_nbr])))
-                # print(nbr_fea_idx[-1])
                 nbr_fea.append(list(map(lambda x: x[1],
                                         nbr[:self.max_num_nbr])))
         nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)

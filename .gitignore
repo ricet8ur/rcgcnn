@@ -96,6 +96,7 @@ Local
 
 
 # many files
+**/*.cif
 **/props
 # large files
 **/*.bin
