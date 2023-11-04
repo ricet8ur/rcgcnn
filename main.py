@@ -206,6 +206,14 @@ def main():
     validate(test_loader, model, criterion, normalizer, test=True)
 
 
+    # last optimization cif2neibours hash save
+    if hasattr(dataset,'cif2neibours'):
+        import ormsgpack as mp
+        hashfile = os.path.join(dataset.root_dir,'cif2neibours.bin')
+        if os.path.exists(hashfile):
+            with open(hashfile,'wb') as f:
+                f.write(mp.packb(dataset.cif2neibours,option=mp.OPT_SERIALIZE_NUMPY))
+
 def train(train_loader, model, criterion, optimizer, epoch, normalizer):
     batch_time = AverageMeter()
     data_time = AverageMeter()
