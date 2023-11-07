@@ -50,19 +50,19 @@ parser.add_argument('--print-freq', '-p', default=10, type=int,
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 train_group = parser.add_mutually_exclusive_group()
-train_group.add_argument('--train-ratio', default=None, type=float, metavar='N',
+train_group.add_argument('--train-ratio', default=0.6, type=float, metavar='N',
                     help='number of training data to be loaded (default none)')
 train_group.add_argument('--train-size', default=None, type=int, metavar='N',
                          help='number of training data to be loaded (default none)')
 valid_group = parser.add_mutually_exclusive_group()
-valid_group.add_argument('--val-ratio', default=0.1, type=float, metavar='N',
+valid_group.add_argument('--val-ratio', default=0.2, type=float, metavar='N',
                     help='percentage of validation data to be loaded (default '
                          '0.1)')
 valid_group.add_argument('--val-size', default=None, type=int, metavar='N',
                          help='number of validation data to be loaded (default '
                               '1000)')
 test_group = parser.add_mutually_exclusive_group()
-test_group.add_argument('--test-ratio', default=0.1, type=float, metavar='N',
+test_group.add_argument('--test-ratio', default=0.2, type=float, metavar='N',
                     help='percentage of test data to be loaded (default 0.1)')
 test_group.add_argument('--test-size', default=None, type=int, metavar='N',
                         help='number of test data to be loaded (default 1000)')
@@ -92,6 +92,7 @@ def main():
     global args, best_mae_error
 
     # load data
+    print(args.data_options)
     dataset = CIFData(*args.data_options)
     collate_fn = collate_pool
     train_loader, val_loader, test_loader = get_train_val_test_loader(
@@ -205,14 +206,6 @@ def main():
     model.load_state_dict(best_checkpoint['state_dict'])
     validate(test_loader, model, criterion, normalizer, test=True)
 
-
-    # last optimization cif2neibours hash save
-    if hasattr(dataset,'cif2neibours'):
-        import ormsgpack as mp
-        hashfile = os.path.join(dataset.root_dir,'cif2neibours.bin')
-        if os.path.exists(hashfile):
-            with open(hashfile,'wb') as f:
-                f.write(mp.packb(dataset.cif2neibours,option=mp.OPT_SERIALIZE_NUMPY))
 
 def train(train_loader, model, criterion, optimizer, epoch, normalizer):
     batch_time = AverageMeter()

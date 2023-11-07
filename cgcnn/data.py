@@ -13,7 +13,9 @@ from pymatgen.core.structure import Structure
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
-
+from pymatgen.io.cif import CifParser
+import msgpack as mp
+import sys
 
 def get_train_val_test_loader(dataset, collate_fn=default_collate,
                               batch_size=64, train_ratio=None,
@@ -261,9 +263,59 @@ class AtomCustomJSONInitializer(AtomInitializer):
 from pymatgen.core.sites import PeriodicSite, Site
 from collections.abc import Iterable, Iterator, Sequence
 from pymatgen.core.structure import PeriodicNeighbor
+from pymatgen.optimization.neighbors import find_points_in_spheres
 
-def get_all_neighbors(
+def _get_neighbor_list(
     self:Structure,
+    r: float,
+    numerical_tol: float = 1e-8,
+    exclude_self: bool = True,
+) -> tuple[np.ndarray, ...]:
+    """Get neighbor lists using numpy array representations without constructing
+    Neighbor objects. If the cython extension is installed, this method will
+    be orders of magnitude faster than `get_all_neighbors_old` and 2-3x faster
+    than `get_all_neighbors`.
+    The returned values are a tuple of numpy arrays
+    (center_indices, points_indices, offset_vectors, distances).
+    Atom `center_indices[i]` has neighbor atom `points_indices[i]` that is
+    translated by `offset_vectors[i]` lattice vectors, and the distance is
+    `distances[i]`.
+    Args:
+        r (float): Radius of sphere
+        sites (list of Sites or None): sites for getting all neighbors,
+            default is None, which means neighbors will be obtained for all
+            sites. This is useful in the situation where you are interested
+            only in one subspecies type, and makes it a lot faster.
+        numerical_tol (float): This is a numerical tolerance for distances.
+            Sites which are < numerical_tol are determined to be coincident
+            with the site. Sites which are r + numerical_tol away is deemed
+            to be within r from the site. The default of 1e-8 should be
+            ok in most instances.
+        exclude_self (bool): whether to exclude atom neighboring with itself within
+            numerical tolerance distance, default to True
+    Returns:
+        tuple: (center_indices, points_indices, offset_vectors, distances)
+    """
+    center_indices, points_indices, images, distances = find_points_in_spheres(
+        np.ascontiguousarray(self.cart_coords, dtype=float),
+        # self['cart_coords'],
+        np.ascontiguousarray([site.coords for site in self.sites], dtype=float),
+        # self['site_coords'],
+        r=float(r),
+        pbc=np.ascontiguousarray(self.pbc, dtype=int),
+        # pbc=self['pbc'],
+        lattice=np.ascontiguousarray(self.lattice.matrix, dtype=float),
+        # lattice=self['lattice_matrix'],
+        tol=numerical_tol,
+    )
+    cond = np.array([True] * len(center_indices))
+    if exclude_self:
+        self_pair = (center_indices == points_indices) & (distances <= numerical_tol)
+        cond = ~self_pair
+    return (center_indices[cond], points_indices[cond], images[cond], distances[cond])
+
+def _get_all_neighbors(
+    self:dict,
     r: float,
     include_index: bool = False,
     include_image: bool = False,
@@ -308,18 +360,26 @@ def get_all_neighbors(
         [[pymatgen.core.structure.PeriodicNeighbor], ..]
     """
     if sites is None:
+        # sites = self['sites']
         sites = self.sites
-    center_indices, points_indices, images, distances = self.get_neighbor_list(
-        r=r, sites=sites, numerical_tol=numerical_tol
+
+    center_indices, points_indices, images, distances = _get_neighbor_list(
+        self, r=r, numerical_tol=numerical_tol
     )
+
+    # center_indices, points_indices, images, distances = self.get_neighbor_list(
+    #     r=r, sites=sites, numerical_tol=numerical_tol
+    # )
     if len(points_indices) < 1:
         return [[]] * len(sites)
-    f_coords = self.frac_coords[points_indices] + images
+    # f_coords = self.frac_coords[points_indices] + images
     neighbor_dict: dict[int, list] = collections.defaultdict(list)
-    lattice = self.lattice
+    # lattice = self.lattice
     atol = Site.position_atol
     all_sites = self.sites
-    for cindex, pindex, image, f_coord, d in zip(center_indices, points_indices, images, f_coords, distances):
+    # all_sites = self['sites']
+    for cindex, pindex, d in zip(center_indices, points_indices, distances):
+    # for cindex, pindex, image, f_coord, d in zip(center_indices, points_indices, images, f_coords, distances):
         psite = all_sites[pindex]
         csite = sites[cindex]
         if (
@@ -418,67 +478,80 @@ class CIFData(Dataset):
         assert os.path.exists(atom_init_file), 'atom_init.json does not exist!'
         self.ari = AtomCustomJSONInitializer(atom_init_file)
         self.gdf = GaussianDistance(dmin=dmin, dmax=self.radius, step=step)
+        with open(os.path.join(self.root_dir,'cifs.bin'),'rb') as f:
+            self.cifs = mp.unpackb(f.read())
+            # cifs = mp.unpackb(f.read(),option=mp.OPT_NON_STR_KEYS)
+            # import sys 
+            # self.crystals = {}
+            # import time
+            # a = time.time()
+            # for cif_id, val in cifs.items():
+
+            #     crystal = Structure.from_dict(val)
+            #     # print(sys.getsizeof(crystal),sys.getsizeof(val))
+            #     # self.crystals[cif_id] = crystal
+            #     # with usage optimization equivalent to
+            #     self.crystals[cif_id]={
+            #         'sites':crystal.sites,
+            #         'site_coords':np.ascontiguousarray([site.coords for site in crystal.sites], dtype=float),
+            #         'cart_coords':np.ascontiguousarray(crystal.cart_coords, dtype=float),
+            #         'lattice_matrix':np.ascontiguousarray(crystal.lattice.matrix, dtype=float),
+            #         'pbc':np.ascontiguousarray(crystal.pbc, dtype=int),
+            #         'specie_numbers':[crystal[i].specie.number for i in range(len(crystal))]
+            #     }
+            
+            # print(time.time()-a)
+            # -> 99 sec
+            # del cifs
 
     def __len__(self):
         return len(self.id_prop_data)
 
 
-    @functools.lru_cache(maxsize=None)  # Cache loaded structures
+    @functools.lru_cache(maxsize=200)  # Cache loaded structures
     def __getitem__(self, idx):
         cif_id, target = self.id_prop_data[idx]
-        from pymatgen.io.cif import CifParser
-        import ormsgpack as mp
-        # slower
+        # slower:
         # crystal = Structure.from_file(os.path.join(self.root_dir,
         #                                        cif_id+'.cif'))
         # faster:
-        if not hasattr(self,'cifs'):
-            with open(os.path.join(self.root_dir,'cifs.bin'),'rb') as f:
-                self.cifs = mp.unpackb(f.read(),option=mp.OPT_NON_STR_KEYS)
         crystal = Structure.from_dict(self.cifs[cif_id])
-        atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
-                              for i in range(len(crystal))])
+        # crystal = {'sites':crystal.sites,
+        #             'site_coords':np.ascontiguousarray([site.coords for site in crystal.sites], dtype=float),
+        #             'cart_coords':np.ascontiguousarray(crystal.cart_coords, dtype=float),
+        #             'lattice_matrix':np.ascontiguousarray(crystal.lattice.matrix, dtype=float),
+        #             'pbc':np.ascontiguousarray(crystal.pbc, dtype=int),
+        #             'specie_numbers':[crystal[i].specie.number for i in range(len(crystal))]
+        #     }
+        # atom_fea = np.vstack([self.ari.get_atom_fea(num) for num in
+                            #   crystal['specie_numbers']])
+        atom_fea = np.vstack([self.ari.get_atom_fea(num) for num in
+                              [crystal[i].specie.number for i in range(len(crystal))]])
         atom_fea = torch.Tensor(atom_fea)
-        # faster
-        # all_nbrs = get_all_neighbors(crystal, self.radius, include_index=True)
-        # slower
+        # faster:
+        all_nbrs = _get_all_neighbors(crystal, self.radius, include_index=True)
+        # slower:
         # all_nbrs = crystal.get_all_neighbors(self.radius, include_index=True)
         
-        # way faster
-        # last optimization: hash[cif_id]=neighbors_features between runs
-        # read here, write in main
-        # ensure dict exists
-        if not hasattr(self,'cif2neibours'):
-            hashfile = os.path.join(self.root_dir,'cif2neibours.bin')
-            if os.path.exists(hashfile):
-                with open(hashfile,'rb') as f:
-                    self.cif2neibours = mp.unpackb(f.read(),option=mp.OPT_SERIALIZE_NUMPY)
-            else:
-                self.cif2neibours = dict()
+        all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
         nbr_fea_idx, nbr_fea = [], []
-        if cif_id in self.cif2neibours:
-            nbr_fea_idx, nbr_fea = self.cif2neibours[cif_id]
-        else:
-            all_nbrs = crystal.get_all_neighbors(self.radius, include_index=True)
-            all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
-            for nbr in all_nbrs:
-                if len(nbr) < self.max_num_nbr:
-                    warnings.warn('{} not find enough neighbors to build graph. '
-                                  'If it happens frequently, consider increase '
-                                  'radius.'.format(cif_id))
-                    nbr_fea_idx.append(list(map(lambda x: x[2], nbr)) +
-                                       [0] * (self.max_num_nbr - len(nbr)))
-                    nbr_fea.append(list(map(lambda x: x[1], nbr)) +
-                                   [self.radius + 1.] * (self.max_num_nbr -
-                                                         len(nbr)))
-                else:
-                    nbr_fea_idx.append(list(map(lambda x: x[2],
-                                                nbr[:self.max_num_nbr])))
-                    nbr_fea.append(list(map(lambda x: x[1],
+        for nbr in all_nbrs:
+            if len(nbr) < self.max_num_nbr:
+                warnings.warn('{} not find enough neighbors to build graph. '
+                              'If it happens frequently, consider increase '
+                              'radius.'.format(cif_id))
+                nbr_fea_idx.append(list(map(lambda x: x[2], nbr)) +
+                                   [0] * (self.max_num_nbr - len(nbr)))
+                nbr_fea.append(list(map(lambda x: x[1], nbr)) +
+                               [self.radius + 1.] * (self.max_num_nbr -
+                                                     len(nbr)))
+            else:
+                nbr_fea_idx.append(list(map(lambda x: x[2],
                                             nbr[:self.max_num_nbr])))
-            nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
-            nbr_fea = self.gdf.expand(nbr_fea)
-            self.cif2neibours[cif_id] = (nbr_fea_idx, nbr_fea)
+                nbr_fea.append(list(map(lambda x: x[1],
+                                        nbr[:self.max_num_nbr])))
+        nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
+        nbr_fea = self.gdf.expand(nbr_fea)
         atom_fea = torch.Tensor(atom_fea)
         nbr_fea = torch.Tensor(nbr_fea)
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
