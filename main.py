@@ -77,7 +77,6 @@ parser.add_argument('--n-conv', default=3, type=int, metavar='N',
                     help='number of conv layers')
 parser.add_argument('--n-h', default=1, type=int, metavar='N',
                     help='number of hidden layers after pooling')
-
 args = parser.parse_args(sys.argv[1:])
 
 args.cuda = not args.disable_cuda and torch.cuda.is_available()
@@ -511,4 +510,8 @@ def adjust_learning_rate(optimizer, epoch, k):
 
 
 if __name__ == '__main__':
+    import time
+    a = time.time()
+    print(time.time()-a)
     main()
+    print(time.time()-a)
