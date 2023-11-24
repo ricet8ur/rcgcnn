@@ -87,12 +87,15 @@ else:
     best_mae_error = 0.
 
 
-def main():
+def main(**kwargs):
     global args, best_mae_error
 
     # load data
-    print(args.data_options)
-    dataset = CIFData(*args.data_options)
+    if 'data_options' in kwargs:
+        dataset = CIFData(kwargs['data_options'])
+    else:
+    # print(args.data_options)
+        dataset = CIFData(*args.data_options)
     collate_fn = collate_pool
     train_loader, val_loader, test_loader = get_train_val_test_loader(
         dataset=dataset,
@@ -106,7 +109,8 @@ def main():
         train_size=args.train_size,
         val_size=args.val_size,
         test_size=args.test_size,
-        return_test=True)
+        return_test=True,
+        **kwargs)
 
     # obtain target value normalizer
     if args.task == 'classification':
@@ -204,7 +208,7 @@ def main():
     best_checkpoint = torch.load('model_best.pth.tar')
     model.load_state_dict(best_checkpoint['state_dict'])
     validate(test_loader, model, criterion, normalizer, test=True)
-
+    
 
 def train(train_loader, model, criterion, optimizer, epoch, normalizer):
     batch_time = AverageMeter()

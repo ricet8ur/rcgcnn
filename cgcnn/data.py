@@ -71,24 +71,47 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
         valid_size = kwargs['val_size']
     else:
         valid_size = int(val_ratio * total_size)
-    train_sampler = SubsetRandomSampler(indices[:train_size])
-    val_sampler = SubsetRandomSampler(
-        indices[-(valid_size + test_size):-test_size])
-    if return_test:
-        test_sampler = SubsetRandomSampler(indices[-test_size:])
-    train_loader = DataLoader(dataset, batch_size=batch_size,
-                              sampler=train_sampler,
-                              num_workers=num_workers,
-                              collate_fn=collate_fn, pin_memory=pin_memory)
-    val_loader = DataLoader(dataset, batch_size=batch_size,
-                            sampler=val_sampler,
-                            num_workers=num_workers,
-                            collate_fn=collate_fn, pin_memory=pin_memory)
-    if return_test:
-        test_loader = DataLoader(dataset, batch_size=batch_size,
-                                 sampler=test_sampler,
-                                 num_workers=num_workers,
-                                 collate_fn=collate_fn, pin_memory=pin_memory)
+
+    # replace Random Sampler
+    if 'torch_generator' in kwargs:
+        print('torch_gen')
+        g = torch.Generator()
+        g.manual_seed(0)
+
+        torch.manual_seed(42)
+        torch.cuda.manual_seed_all(42)
+        train_loader = DataLoader(dataset, batch_size=batch_size,
+                                  sampler=train_sampler,
+                                  num_workers=num_workers,
+                                  collate_fn=collate_fn, pin_memory=pin_memory, generator=g)
+        val_loader = DataLoader(dataset, batch_size=batch_size,
+                                sampler=val_sampler,
+                                num_workers=num_workers,
+                                collate_fn=collate_fn, pin_memory=pin_memory, generator=g)
+        if return_test:
+            test_loader = DataLoader(dataset, batch_size=batch_size,
+                                     sampler=test_sampler,
+                                     num_workers=num_workers,
+                                     collate_fn=collate_fn, pin_memory=pin_memory, generator=g)
+    else:
+        train_sampler = SubsetRandomSampler(indices[:train_size])
+        val_sampler = SubsetRandomSampler(
+            indices[-(valid_size + test_size):-test_size])
+        if return_test:
+            test_sampler = SubsetRandomSampler(indices[-test_size:])
+        train_loader = DataLoader(dataset, batch_size=batch_size,
+                                  sampler=train_sampler,
+                                  num_workers=num_workers,
+                                  collate_fn=collate_fn, pin_memory=pin_memory)
+        val_loader = DataLoader(dataset, batch_size=batch_size,
+                                sampler=val_sampler,
+                                num_workers=num_workers,
+                                collate_fn=collate_fn, pin_memory=pin_memory)
+        if return_test:
+            test_loader = DataLoader(dataset, batch_size=batch_size,
+                                     sampler=test_sampler,
+                                     num_workers=num_workers,
+                                     collate_fn=collate_fn, pin_memory=pin_memory)
     if return_test:
         return train_loader, val_loader, test_loader
     else:
