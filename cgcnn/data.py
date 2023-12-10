@@ -75,24 +75,32 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
     # replace Random Sampler
     if 'torch_generator' in kwargs:
         print('torch_gen')
-        g = torch.Generator()
-        g.manual_seed(0)
-
-        torch.manual_seed(42)
-        torch.cuda.manual_seed_all(42)
+        torch.backends.cudnn.benchmark = False
+        torch.use_deterministic_algorithms(True)
+        # g = torch.Generator()
+        # g=g.manual_seed(0)
+        random.seed(0)
+        np.random.seed(0)
+        g=torch.manual_seed(42)
+        # torch.cuda.manual_seed_all(42)
+        train_sampler = SubsetRandomSampler(indices[:train_size],g)
+        val_sampler = SubsetRandomSampler(
+            indices[-(valid_size + test_size):-test_size],g)
+        if return_test:
+            test_sampler = SubsetRandomSampler(indices[-test_size:],g)
         train_loader = DataLoader(dataset, batch_size=batch_size,
                                   sampler=train_sampler,
                                   num_workers=num_workers,
-                                  collate_fn=collate_fn, pin_memory=pin_memory, generator=g)
+                                  collate_fn=collate_fn, pin_memory=pin_memory,generator=g)
         val_loader = DataLoader(dataset, batch_size=batch_size,
                                 sampler=val_sampler,
                                 num_workers=num_workers,
-                                collate_fn=collate_fn, pin_memory=pin_memory, generator=g)
+                                collate_fn=collate_fn, pin_memory=pin_memory,generator=g)
         if return_test:
             test_loader = DataLoader(dataset, batch_size=batch_size,
                                      sampler=test_sampler,
                                      num_workers=num_workers,
-                                     collate_fn=collate_fn, pin_memory=pin_memory, generator=g)
+                                     collate_fn=collate_fn, pin_memory=pin_memory,generator=g)
     else:
         train_sampler = SubsetRandomSampler(indices[:train_size])
         val_sampler = SubsetRandomSampler(
@@ -375,7 +383,39 @@ def get_all_neighbors(
     return neighbors 
 
 
-
+@functools.lru_cache(maxsize=20000)  # Cache loaded structures
+def _getitem(self, idx):
+    cif_id, target = self.id_prop_data[idx]
+  
+    crystal = Structure.from_dict(self.cifs[cif_id])
+    atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
+                          for i in range(len(crystal))])
+    atom_fea = torch.Tensor(atom_fea)
+    all_nbrs = get_all_neighbors(crystal, self.radius, include_index=True)
+    all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
+    nbr_fea_idx, nbr_fea = [], []
+    for nbr in all_nbrs:
+        if len(nbr) < self.max_num_nbr:
+            warnings.warn('{} not find enough neighbors to build graph. '
+                          'If it happens frequently, consider increase '
+                          'radius.'.format(cif_id))
+            nbr_fea_idx.append(list(map(lambda x: x[2], nbr)) +
+                               [0] * (self.max_num_nbr - len(nbr)))
+            nbr_fea.append(list(map(lambda x: x[1], nbr)) +
+                           [self.radius + 1.] * (self.max_num_nbr -
+                                                 len(nbr)))
+        else:
+            nbr_fea_idx.append(list(map(lambda x: x[2],
+                                        nbr[:self.max_num_nbr])))
+            nbr_fea.append(list(map(lambda x: x[1],
+                                    nbr[:self.max_num_nbr])))
+    nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
+    nbr_fea = self.gdf.expand(nbr_fea)
+    atom_fea = torch.Tensor(atom_fea)
+    nbr_fea = torch.Tensor(nbr_fea)
+    nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
+    target = torch.Tensor([float(target)])
+    return (atom_fea, nbr_fea, nbr_fea_idx), target, cif_id
 
 class CIFData(Dataset):
     """
@@ -452,8 +492,9 @@ class CIFData(Dataset):
         return len(self.id_prop_data)
 
 
-    @functools.lru_cache(maxsize=160000)  # Cache loaded structures
+    # @functools.lru_cache(maxsize=20000)  # Cache loaded structures
     def __getitem__(self, idx):
+        return _getitem(self, idx)
         cif_id, target = self.id_prop_data[idx]
       
         crystal = Structure.from_dict(self.cifs[cif_id])

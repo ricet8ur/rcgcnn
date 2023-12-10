@@ -86,13 +86,20 @@ if args.task == 'regression':
 else:
     best_mae_error = 0.
 
-
+dataset=None
 def main(**kwargs):
-    global args, best_mae_error
+    global args, best_mae_error, dataset
 
     # load data
-    if 'data_options' in kwargs:
-        dataset = CIFData(kwargs['data_options'])
+    if 'args' in kwargs:
+        if args.task == 'regression':
+            best_mae_error = 1e10
+        else:
+            best_mae_error = 0.
+        args = kwargs['args']
+        print('args:',args)
+        if dataset is None:
+            dataset = CIFData(*args.data_options)
     else:
     # print(args.data_options)
         dataset = CIFData(*args.data_options)
@@ -207,7 +214,7 @@ def main(**kwargs):
     print('---------Evaluate Model on Test Set---------------')
     best_checkpoint = torch.load('model_best.pth.tar')
     model.load_state_dict(best_checkpoint['state_dict'])
-    validate(test_loader, model, criterion, normalizer, test=True)
+    return validate(test_loader, model, criterion, normalizer, test=True)
     
 
 def train(train_loader, model, criterion, optimizer, epoch, normalizer):
