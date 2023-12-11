@@ -100,3 +100,4 @@ Local
 **/props
 # large files
 **/*.bin
+**/mp.2018.6.1.json*

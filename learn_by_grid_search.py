@@ -1,4 +1,3 @@
-# this script checks consistency of learning on the same data with the same random_key
 import pandas as pd
 import json
 import numpy as np
@@ -8,6 +7,10 @@ import argparse
 import main
 import sys
 import torch
+import msgpack as mp
+
+df = pd.read_json("./data/root/data/mp.2018.6.1.json/mp.2018.6.1.json")
+df.info()
 parser = argparse.ArgumentParser(description='Crystal Graph Convolutional Neural Networks')
 parser.add_argument('data_options', metavar='OPTIONS', nargs='+',
                     help='dataset options, started with the path to root dir, '
@@ -91,26 +94,72 @@ fields = [
     "homogeneous_poisson",
 ]
 
+reference_csv = {
+    "mp-ids-3402.csv": [
+        "k_voigt",
+        "k_reuss",
+        "k_vrh",
+        "g_voigt",
+        "g_reuss",
+        "g_vrh",
+        "homogeneous_poisson",
+    ],
+    "mp-ids-27430.csv": ["band_gap"],
+    "mp-ids-46744.csv": ["energy_per_atom", "formation_energy_per_atom", "efermi"],
+}
+
+
+# set only the mp-ids that exist in the initial dataset
+
+def load_properties_from_bin(file):
+    with open(file, "rb") as f:
+        properties = mp.unpackb(f.read())
+        return properties
+    return None
+
+t2m_file = './data/root/data/t2m.bin'
+t2m = load_properties_from_bin(t2m_file)
+
+df = pd.read_csv("./non_ill_df.csv",index_col=0)
+print(df.info())
+
+def get_df_for_csv(csv:str):
+    global t2m, df
+    ids = pd.read_csv("./data/material-data/" + csv)
+    ids = [list(ids)[0]]+list(ids.iloc[:, 0])
+    df = pd.DataFrame()
+    for t in ids:
+        m = t2m[t]
+        df=pd.concat([df,df.loc[[m]]])
+    return df
+
 def set_property_to_ids(df: pd.DataFrame, prop: str):
     part_df = df[prop].dropna()
     part_df = part_df.groupby(part_df.index).first()
     part_df.to_csv("./data/root/data/id_prop.csv", index=True, header=False)
 
-non_ill_df = pd.read_csv("./non_ill_df.csv",index_col=0)
-print(non_ill_df.info())
+all_params = {'numprops':[2,3,10],
+              'n-conv':list(range(1,6)),
+              '':[10,20,50,100,200],
+              'n-h':list(range(1,5)),
+              '':list(range(1,6)),
+              '':[np.exp(x) for x in [-6,-4,-2,0]],
+              '':[np.exp(x) for x in [-8,-6,-4,-2]],
+              '':[np.exp(x) for x in range(-8,-2)],
+              '':[0,0.1,0.2]}
 resdict = dict()
 maedict = dict()
-for k in range(2):
-    for prop in ['g_vrh']:
-        set_property_to_ids(non_ill_df, prop)
-        res = main.main(args=args,torch_generator=1)
-        resdict[k] = float(res)
-
-        print(prop, resdict[k])
-
-        st.move("checkpoint.pth.tar", "./trained/" + prop + "_check.pth.tar")
-        st.move("model_best.pth.tar", "./trained/" + prop + "_best.pth.tar")
-        st.move("test_results.csv", "./trained/" + prop + "_results.csv")
+for csv in reference_csv.keys():
+    df = get_df_for_csv(csv)
+    for prop in reference_csv[csv]:
+        for q in range(20):
+            # params = 
+            set_property_to_ids(df, prop)
+            res = main.main(args=args,torch_generator=1)
+            resdict[params] = float(res)
+            st.move("checkpoint.pth.tar", "./trained/" + prop + "_check.pth.tar")
+            st.move("model_best.pth.tar", "./trained/" + prop + "_best.pth.tar")
+            st.move("test_results.csv", "./trained/" + prop + "_results.csv")
         
 with open("train_outputs.json", "w") as f:
     json.dump(resdict, f)
