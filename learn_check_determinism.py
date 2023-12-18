@@ -9,7 +9,7 @@ import main
 import sys
 import torch
 parser = argparse.ArgumentParser(description='Crystal Graph Convolutional Neural Networks')
-parser.add_argument('data_options', metavar='OPTIONS', nargs='+',
+parser.add_argument('data_options',default=['./data/root/data/'], metavar='OPTIONS', nargs='+',
                     help='dataset options, started with the path to root dir, '
                          'then other options')
 parser.add_argument('--task', choices=['regression', 'classification'],
@@ -100,7 +100,10 @@ non_ill_df = pd.read_csv("./non_ill_df.csv",index_col=0)
 print(non_ill_df.info())
 resdict = dict()
 maedict = dict()
-for k in range(5):
+
+import time
+a = time.time()
+for k in range(1):
     for prop in ['g_vrh']:
         set_property_to_ids(non_ill_df, prop)
         res = main.main(args=args,torch_generator=1)
@@ -114,3 +117,4 @@ for k in range(5):
         
 with open("train_outputs.json", "w") as f:
     json.dump(resdict, f)
+print(time.time()-a)

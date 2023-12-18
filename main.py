@@ -97,9 +97,8 @@ def main(**kwargs):
         else:
             best_mae_error = 0.
         args = kwargs['args']
-        print('args:',args)
-        if dataset is None:
-            dataset = CIFData(*args.data_options)
+        # print('args:',args)
+        dataset = CIFData(*args.data_options)
     else:
     # print(args.data_options)
         dataset = CIFData(*args.data_options)

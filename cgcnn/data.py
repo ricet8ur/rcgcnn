@@ -383,39 +383,10 @@ def get_all_neighbors(
     return neighbors 
 
 
-@functools.lru_cache(maxsize=20000)  # Cache loaded structures
-def _getitem(self, idx):
-    cif_id, target = self.id_prop_data[idx]
-  
-    crystal = Structure.from_dict(self.cifs[cif_id])
-    atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
-                          for i in range(len(crystal))])
-    atom_fea = torch.Tensor(atom_fea)
-    all_nbrs = get_all_neighbors(crystal, self.radius, include_index=True)
-    all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
-    nbr_fea_idx, nbr_fea = [], []
-    for nbr in all_nbrs:
-        if len(nbr) < self.max_num_nbr:
-            warnings.warn('{} not find enough neighbors to build graph. '
-                          'If it happens frequently, consider increase '
-                          'radius.'.format(cif_id))
-            nbr_fea_idx.append(list(map(lambda x: x[2], nbr)) +
-                               [0] * (self.max_num_nbr - len(nbr)))
-            nbr_fea.append(list(map(lambda x: x[1], nbr)) +
-                           [self.radius + 1.] * (self.max_num_nbr -
-                                                 len(nbr)))
-        else:
-            nbr_fea_idx.append(list(map(lambda x: x[2],
-                                        nbr[:self.max_num_nbr])))
-            nbr_fea.append(list(map(lambda x: x[1],
-                                    nbr[:self.max_num_nbr])))
-    nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
-    nbr_fea = self.gdf.expand(nbr_fea)
-    atom_fea = torch.Tensor(atom_fea)
-    nbr_fea = torch.Tensor(nbr_fea)
-    nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
-    target = torch.Tensor([float(target)])
-    return (atom_fea, nbr_fea, nbr_fea_idx), target, cif_id
+# @functools.lru_cache(maxsize=20000)  # Cache loaded structures
+# def cached_getitem(self, mid):
+#     pass
+CifData_global_cache = {}
 
 class CIFData(Dataset):
     """
@@ -475,54 +446,75 @@ class CIFData(Dataset):
         with open(id_prop_file) as f:
             reader = csv.reader(f)
             self.id_prop_data = [row for row in reader]
+        # create new bijective map between mp-id and index
+        # based on sorted indexes of mp-ids for the given main() call
+        self.idx2mid = dict()
+        self.mid2target = dict() # aka new self.id_prop_data with mp_id index insread of random index
+        mp_ids_list = []
+        for idx in range(len(self.id_prop_data)):
+            cif_id, target = self.id_prop_data[idx]
+            mid = int(cif_id[3:])
+            mp_ids_list.append(mid)
+            self.mid2target[mid] = (cif_id,target)
+
+        self.idx_sequence = []
+        for idx, mid in enumerate(sorted(mp_ids_list)):
+            self.idx2mid[idx]=mid
+        
+        self.idx_sequence=[idx for idx in range(len(self.id_prop_data))]
+        # instead of self.id_prop_data operate on suffled idx_sequence=[idx1,idx2,idx3]
         random.seed(random_seed)
-        random.shuffle(self.id_prop_data)
+        random.shuffle(self.idx_sequence)
         atom_init_file = os.path.join(self.root_dir, 'atom_init.json')
         assert os.path.exists(atom_init_file), 'atom_init.json does not exist!'
         self.ari = AtomCustomJSONInitializer(atom_init_file)
         self.gdf = GaussianDistance(dmin=dmin, dmax=self.radius, step=step)
-        import msgpack as mp
-        if not hasattr(self,'cifs'):
-            with open(os.path.join(self.root_dir,'cifs.bin'),'rb') as f:
-                self.cifs = mp.unpackb(f.read())
-            for i in range(len(self.id_prop_data)):
-                self[i]
+        # load all cifs from 'cifs.bin', which contains cif file for each possible mp-id
+        if len(CifData_global_cache) == 0:
+            import msgpack as mp
+            if not hasattr(self,'cifs'):
+                with open(os.path.join(self.root_dir,'cifs.bin'),'rb') as f:
+                    self.cifs = mp.unpackb(f.read())
+                for i in range(len(self.idx_sequence)):
+                    self[i]
 
     def __len__(self):
-        return len(self.id_prop_data)
+        return len(self.idx_sequence)
 
 
     # @functools.lru_cache(maxsize=20000)  # Cache loaded structures
     def __getitem__(self, idx):
-        return _getitem(self, idx)
-        cif_id, target = self.id_prop_data[idx]
-      
-        crystal = Structure.from_dict(self.cifs[cif_id])
-        atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
-                              for i in range(len(crystal))])
-        atom_fea = torch.Tensor(atom_fea)
-        all_nbrs = get_all_neighbors(crystal, self.radius, include_index=True)
-        all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
-        nbr_fea_idx, nbr_fea = [], []
-        for nbr in all_nbrs:
-            if len(nbr) < self.max_num_nbr:
-                warnings.warn('{} not find enough neighbors to build graph. '
-                              'If it happens frequently, consider increase '
-                              'radius.'.format(cif_id))
-                nbr_fea_idx.append(list(map(lambda x: x[2], nbr)) +
-                                   [0] * (self.max_num_nbr - len(nbr)))
-                nbr_fea.append(list(map(lambda x: x[1], nbr)) +
-                               [self.radius + 1.] * (self.max_num_nbr -
-                                                     len(nbr)))
-            else:
-                nbr_fea_idx.append(list(map(lambda x: x[2],
+        mid = self.idx2mid[self.idx_sequence[idx]]
+        if mid not in CifData_global_cache:
+            cif_id, target = self.mid2target[mid]
+
+            crystal = Structure.from_dict(self.cifs[cif_id])
+            atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
+                                  for i in range(len(crystal))])
+            atom_fea = torch.Tensor(atom_fea)
+            all_nbrs = get_all_neighbors(crystal, self.radius, include_index=True)
+            all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
+            nbr_fea_idx, nbr_fea = [], []
+            for nbr in all_nbrs:
+                if len(nbr) < self.max_num_nbr:
+                    warnings.warn('{} not find enough neighbors to build graph. '
+                                  'If it happens frequently, consider increase '
+                                  'radius.'.format(cif_id))
+                    nbr_fea_idx.append(list(map(lambda x: x[2], nbr)) +
+                                       [0] * (self.max_num_nbr - len(nbr)))
+                    nbr_fea.append(list(map(lambda x: x[1], nbr)) +
+                                   [self.radius + 1.] * (self.max_num_nbr -
+                                                         len(nbr)))
+                else:
+                    nbr_fea_idx.append(list(map(lambda x: x[2],
+                                                nbr[:self.max_num_nbr])))
+                    nbr_fea.append(list(map(lambda x: x[1],
                                             nbr[:self.max_num_nbr])))
-                nbr_fea.append(list(map(lambda x: x[1],
-                                        nbr[:self.max_num_nbr])))
-        nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
-        nbr_fea = self.gdf.expand(nbr_fea)
-        atom_fea = torch.Tensor(atom_fea)
-        nbr_fea = torch.Tensor(nbr_fea)
-        nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
-        target = torch.Tensor([float(target)])
-        return (atom_fea, nbr_fea, nbr_fea_idx), target, cif_id
+            nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
+            nbr_fea = self.gdf.expand(nbr_fea)
+            atom_fea = torch.Tensor(atom_fea)
+            nbr_fea = torch.Tensor(nbr_fea)
+            nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
+            target = torch.Tensor([float(target)])
+            CifData_global_cache[mid] = ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id)
+        return CifData_global_cache[mid]
