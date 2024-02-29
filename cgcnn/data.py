@@ -448,8 +448,9 @@ class CIFData(Dataset):
             self.id_prop_data = [row for row in reader]
         # create new bijective map between mp-id and index
         # based on sorted indexes of mp-ids for the given main() call
+        # print('p',self.id_prop_data)
         self.idx2mid = dict()
-        self.mid2target = dict() # aka new self.id_prop_data with mp_id index insread of random index
+        self.mid2target = dict() # aka new self.id_prop_data with mp_id index instead of random index
         mp_ids_list = []
         for idx in range(len(self.id_prop_data)):
             cif_id, target = self.id_prop_data[idx]
@@ -487,7 +488,10 @@ class CIFData(Dataset):
         mid = self.idx2mid[self.idx_sequence[idx]]
         if mid not in CifData_global_cache:
             cif_id, target = self.mid2target[mid]
-
+            if not hasattr(self,'cifs'):
+                import msgpack as mp
+                with open(os.path.join(self.root_dir,'cifs.bin'),'rb') as f:
+                    self.cifs = mp.unpackb(f.read())
             crystal = Structure.from_dict(self.cifs[cif_id])
             atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
                                   for i in range(len(crystal))])

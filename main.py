@@ -123,6 +123,7 @@ def main(**kwargs):
         normalizer = Normalizer(torch.zeros(2))
         normalizer.load_state_dict({'mean': 0., 'std': 1.})
     else:
+        print(len(dataset))
         if len(dataset) < 500:
             warnings.warn('Dataset has less than 500 data points. '
                           'Lower accuracy is expected. ')
