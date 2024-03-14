@@ -158,10 +158,10 @@ all_params = {
             #   '':[np.exp(x) for x in range(-8,-2)],
             #   '':[0,0.1,0.2]
             }
-resdict = dict()
+reslist = list()
 maedict = dict()
 
-current_property = 'k_voigt'
+current_property = 'band_gap'
 # from sklearn.base import BaseEstimator
 # class estimator(BaseEstimator):
 #     def __init__(self, n_conv=0,atom_fea_len=0, h_fea_len=0,n_h=0):
@@ -200,40 +200,68 @@ current_property = 'k_voigt'
 #         with open(f"opt_hyperparams_prop_{current_property}_log.json", "w") as f:
 #             json.dump(resdict, f)
 #         return float(res)
-
-from sklearn.model_selection import RandomizedSearchCV
+import skopt
+from skopt import space
+# from sklearn.model_selection import RandomizedSearchCV
 best_mae = dict()
-for csv in reference_csv.keys():
-    for prop in reference_csv[csv]:
-        current_property = prop
-        df = get_df_for_csv(csv)
-        print(df.describe())
-        set_property_to_ids(df, prop)
-        # random search 
-        params = dict()
-        for attempt in range(15):
-            for k,v in all_params.items():
-                params[k] = int(np.random.choice(v,1)[0])
-                # params[k] = np.random.choice(v,1)[0]
-            print(params)
-            # rs = RandomizedSearchCV(estimator(),
-            #     param_distributions=all_params,
-            #     n_iter=15,scoring=)
-            # rs.fit([0])
-            args.n_conv =params['n_conv']
-            args.atom_fea_len =params['atom_fea_len']
-            args.h_fea_len =params['h_fea_len']
-            args.n_h =params['n_h']
-            res = main.main(args=args,torch_generator=1)
-            st.move("checkpoint.pth.tar", "./trained/" + prop + "_check.pth.tar")
-            st.move("model_best.pth.tar", "./trained/" + prop + "_best.pth.tar")
-            st.move("test_results.csv", "./trained/" + prop + "_results.csv")
-            resdict[prop] = float(res), params
-            with open(f"opt_hyperparams_prop_{current_property}_log.json", "w") as f:
-                json.dump(resdict, f)
-            if prop not in best_mae:
-                best_mae[prop] = float(res),params
-            elif best_mae[prop][0]>float(res):
-                best_mae[prop]= float(res),params
+# for csv in reference_csv.keys():
+#     for prop in reference_csv[csv]:
+prop = 'band_gap'
+current_property = prop
+# df = get_df_for_csv(csv)
+df = get_df_for_csv('mp-ids-27430.csv')
+print(df.describe())
+set_property_to_ids(df, prop)
+# random search 
+# params = dict()
+# for attempt in range(15):
+#     for k,v in all_params.items():
+#         params[k] = int(np.random.choice(v,1)[0])
+#     print(params)
+#     args.n_conv =params['n_conv']
+#     args.atom_fea_len =params['atom_fea_len']
+#     args.h_fea_len =params['h_fea_len']
+#     args.n_h =params['n_h']
+#     res = main.main(args=args,torch_generator=1)
+#     st.move("checkpoint.pth.tar", "./trained/" + prop + "_check.pth.tar")
+#     st.move("model_best.pth.tar", "./trained/" + prop + "_best.pth.tar")
+#     st.move("test_results.csv", "./trained/" + prop + "_results.csv")
+#     resdict[prop] = float(res), params
+#     with open(f"opt_hyperparams_prop_{current_property}_log.json", "w") as f:
+#         json.dump(resdict, f)
+#     if prop not in best_mae:
+#         best_mae[prop] = float(res),params
+#     elif best_mae[prop][0]>float(res):
+#         best_mae[prop]= float(res),params
+SPACE = [
+    space.Integer(1,6, name='n_conv', prior='uniform'),
+    space.Integer(10, 50, name='atom_fea_len',prior='uniform'),
+    space.Integer(10, 50, name='h_fea_len'),
+    space.Integer(1, 6, name='n_h'),]
+@skopt.utils.use_named_args(SPACE)
+def objective(**params):
+    args.n_conv =params['n_conv']
+    args.atom_fea_len =params['atom_fea_len']
+    args.h_fea_len =params['h_fea_len']
+    args.n_h =params['n_h']
+    res =  main.main(args= args,torch_generator=1)
+    st.move("checkpoint.pth.tar", "./trained/" + prop + "_check.pth.tar")
+    st.move("model_best.pth.tar", "./trained/" + prop + "_best.pth.tar")
+    st.move("test_results.csv", "./trained/" + prop + "_results.csv")
+    reslist.append((float(res), {
+'n_conv':int(params['n_conv']),
+'atom_fea_len':int(params['atom_fea_len']),
+'h_fea_len':int(params['h_fea_len']),
+'n_h':int(params['n_h']),}))
+    with open(f"opt_hyperparams_prop_{current_property}_log.json", "w") as f:
+        json.dump(reslist, f)
+    return float(res)
+from skopt import BayesSearchCV
+results = skopt.forest_minimize(objective, SPACE, n_calls=100)
+
 with open(f"opt_hyperparams_best_log.json", "w") as f:
     json.dump(best_mae, f)
+import skopt.plots as plots
+import matplotlib.pyplot as plt
+plots.plot_convergence(results)
+plt.savefig("fig.png")
