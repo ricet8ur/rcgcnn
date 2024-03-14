@@ -235,29 +235,38 @@ set_property_to_ids(df, prop)
 #         best_mae[prop]= float(res),params
 SPACE = [
     space.Integer(1,6, name='n_conv', prior='uniform'),
-    space.Integer(10, 50, name='atom_fea_len',prior='uniform'),
-    space.Integer(10, 50, name='h_fea_len'),
-    space.Integer(1, 6, name='n_h'),]
+    space.Integer(10, 200, name='atom_fea_len',prior='uniform'),
+    space.Integer(10, 200, name='h_fea_len'),
+    space.Integer(1, 5, name='n_h'),]
 @skopt.utils.use_named_args(SPACE)
 def objective(**params):
+    tmp = {
+'n_conv':int(params['n_conv']),
+'atom_fea_len':int(params['atom_fea_len']),
+'h_fea_len':int(params['h_fea_len']),
+'n_h':int(params['n_h']),}
+    reslist.append((100,tmp))
+    with open(f"opt_hyperparams_prop_{current_property}_log.json", "w") as f:
+        json.dump(reslist, f)
+    
     args.n_conv =params['n_conv']
     args.atom_fea_len =params['atom_fea_len']
     args.h_fea_len =params['h_fea_len']
     args.n_h =params['n_h']
+
     res =  main.main(args= args,torch_generator=1)
+    res=float(res)
+    with torch.no_grad():
+        torch.cuda.empty_cache()
     st.move("checkpoint.pth.tar", "./trained/" + prop + "_check.pth.tar")
     st.move("model_best.pth.tar", "./trained/" + prop + "_best.pth.tar")
     st.move("test_results.csv", "./trained/" + prop + "_results.csv")
-    reslist.append((float(res), {
-'n_conv':int(params['n_conv']),
-'atom_fea_len':int(params['atom_fea_len']),
-'h_fea_len':int(params['h_fea_len']),
-'n_h':int(params['n_h']),}))
+    reslist[-1] = ((res,tmp))
     with open(f"opt_hyperparams_prop_{current_property}_log.json", "w") as f:
         json.dump(reslist, f)
-    return float(res)
+    return res
 from skopt import BayesSearchCV
-results = skopt.forest_minimize(objective, SPACE, n_calls=100)
+results = skopt.gp_minimize(objective, SPACE, n_calls=30, n_initial_points=1)
 
 with open(f"opt_hyperparams_best_log.json", "w") as f:
     json.dump(best_mae, f)
