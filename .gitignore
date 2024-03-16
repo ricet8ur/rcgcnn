@@ -100,4 +100,6 @@ Local
 **/props
 # large files
 **/*.bin
+# t2m
+!data/root/data/t2m.bin
 **/mp.2018.6.1.json*
