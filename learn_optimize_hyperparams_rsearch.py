@@ -237,7 +237,7 @@ SPACE = [
     space.Integer(1,6, name='n_conv', prior='uniform'),
     space.Integer(10, 200, name='atom_fea_len',prior='uniform'),
     space.Integer(10, 200, name='h_fea_len'),
-    space.Integer(1, 5, name='n_h'),]
+    space.Integer(1, 6, name='n_h'),]
 @skopt.utils.use_named_args(SPACE)
 def objective(**params):
     tmp = {
@@ -253,24 +253,41 @@ def objective(**params):
     args.atom_fea_len =params['atom_fea_len']
     args.h_fea_len =params['h_fea_len']
     args.n_h =params['n_h']
+    oom = False
+    try:
+        res =  main.main(args= args,torch_generator=1)
+        st.move("checkpoint.pth.tar", "./trained/" + prop + "_check.pth.tar")
+        st.move("model_best.pth.tar", "./trained/" + prop + "_best.pth.tar")
+        st.move("test_results.csv", "./trained/" + prop + "_results.csv")
+    except RuntimeError:
+        oom = True
+        
+    if oom:
+        with torch.no_grad():
+            torch.cuda.empty_cache()
+        import gc
+        gc.collect()
+        args.disable_cuda =True
+        args.cuda = not args.disable_cuda and torch.cuda.is_available()
+        # res =  main.main(args= args,torch_generator=1)
+        res = 1
+        # <- ~ big value
+        args.disable_cuda =False
+        args.cuda = not args.disable_cuda and torch.cuda.is_available()
 
-    res =  main.main(args= args,torch_generator=1)
     res=float(res)
     with torch.no_grad():
         torch.cuda.empty_cache()
-    st.move("checkpoint.pth.tar", "./trained/" + prop + "_check.pth.tar")
-    st.move("model_best.pth.tar", "./trained/" + prop + "_best.pth.tar")
-    st.move("test_results.csv", "./trained/" + prop + "_results.csv")
     reslist[-1] = ((res,tmp))
     with open(f"opt_hyperparams_prop_{current_property}_log.json", "w") as f:
         json.dump(reslist, f)
     return res
 from skopt import BayesSearchCV
-results = skopt.gp_minimize(objective, SPACE, n_calls=30, n_initial_points=1)
-
+results = skopt.gp_minimize(objective, SPACE, n_calls=20, n_initial_points=1,x0=[[i.high for i in SPACE]])
 with open(f"opt_hyperparams_best_log.json", "w") as f:
     json.dump(best_mae, f)
 import skopt.plots as plots
 import matplotlib.pyplot as plt
-plots.plot_convergence(results)
+# plots.plot_convergence(results)
+_ = plots.plot_objective(results,  sample_source='result', n_points=20)
 plt.savefig("fig.png")
