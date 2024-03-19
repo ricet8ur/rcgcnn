@@ -7,7 +7,7 @@ import argparse
 import sys
 import torch
 import msgpack as mp
-n_calls = 2
+n_calls = 100
 
 parser = argparse.ArgumentParser(description='Crystal Graph Convolutional Neural Networks')
 parser.add_argument('data_options', metavar='OPTIONS', nargs='+',
