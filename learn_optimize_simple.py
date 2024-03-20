@@ -7,7 +7,9 @@ import argparse
 import sys
 import torch
 import msgpack as mp
-n_calls = 100
+import main
+
+n_calls =2 
 
 parser = argparse.ArgumentParser(description='Crystal Graph Convolutional Neural Networks')
 parser.add_argument('data_options', metavar='OPTIONS', nargs='+',
@@ -71,7 +73,6 @@ parser.add_argument('--n-h', default=1, type=int, metavar='N',
 args = parser.parse_args()
 args.data_options = ['./data/root/data/']
 args.cuda = not args.disable_cuda and torch.cuda.is_available()
-import main
 
 
 # compress with zstd
@@ -115,12 +116,12 @@ fields = [
 
 reference_csv = {
     "mp-ids-3402.csv": [
-        # "k_voigt",
-        # "k_reuss",
-        # "k_vrh",
-        # "g_voigt",
-        # "g_reuss",
-        # "g_vrh",
+        "k_voigt",
+        "k_reuss",
+        "k_vrh",
+        "g_voigt",
+        "g_reuss",
+        "g_vrh",
         "homogeneous_poisson",
     ],
     "mp-ids-46744.csv": ["energy_per_atom", "formation_energy_per_atom", "efermi"],
@@ -139,7 +140,7 @@ t2m = load_properties_from_bin(t2m_file)
 full_df = pd.read_csv("./scripts/non_ill_df.csv",index_col=0)
 
 full_df = pd.DataFrame(load_properties_from_bin('./data/root/data/props.bin')).transpose()
-# print(full_df.head(10))
+# print(full_df.head(800))
 
 for moduli in ["k_voigt", "k_reuss", "k_vrh", "g_voigt", "g_reuss", "g_vrh"]:
     full_df[moduli] = np.log(full_df[moduli])
@@ -150,10 +151,17 @@ def get_df_for_csv(csv:str):
     ids = pd.read_csv("./data/material-data/" + csv)
     ids = [list(ids)[0]]+list(ids.iloc[:, 0])
     df = pd.DataFrame()
-    for t in ids:
-        m = t2m[t]
-        df.loc
-        df=pd.concat([df,full_df.loc[[m]]])
+    # for t in ids:
+    #     m = t2m[t]
+    #     # print(m)
+    #     # df.loc
+    #     try:
+    #         df=pd.concat([df,full_df.loc[[m]]])
+    #     except:
+    #         print(f'{m} not found')
+    idx = full_df.index
+    ms =[t2m[t] for t in ids if t2m[t] in idx]
+    df = full_df.loc[ms]
     return df
 
 def set_property_to_ids(df: pd.DataFrame, prop: str):
@@ -175,7 +183,7 @@ set_property_to_ids(df, prop)
 SPACE = [
     space.Integer(1,6, name='n_conv', prior='uniform'),
     space.Integer(10, 200, name='atom_fea_len',prior='uniform'),
-    space.Integer(10, 200, name='h_fea_len'),
+    space.Integer(5, 200, name='h_fea_len'),
     space.Integer(1, 6, name='n_h'),]
 @skopt.utils.use_named_args(SPACE)
 def objective(**params):
