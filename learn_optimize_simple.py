@@ -9,7 +9,7 @@ import torch
 import msgpack as mp
 import main
 
-n_calls = 100
+n_calls = 200
 
 parser = argparse.ArgumentParser(description='Crystal Graph Convolutional Neural Networks')
 parser.add_argument('data_options', metavar='OPTIONS', nargs='+',
@@ -117,15 +117,15 @@ fields = [
 reference_csv = {
     "mp-ids-3402.csv": [
         "k_voigt",
-        # "k_reuss",
-        # "k_vrh",
+        "k_reuss",
+        "k_vrh",
         "g_voigt",
-        # "g_reuss",
-        # "g_vrh",
+        "g_reuss",
+        "g_vrh",
         "homogeneous_poisson",
     ],
-    "mp-ids-27430.csv": ["band_gap"],
     "mp-ids-46744.csv": ["energy_per_atom", "formation_energy_per_atom", "efermi"],
+    "mp-ids-27430.csv": ["band_gap"],
 }
 
 def load_properties_from_bin(file):
@@ -252,4 +252,5 @@ for k,v in reference_csv.items():
         import skopt.plots as plots
         import matplotlib.pyplot as plt
         _ = plots.plot_objective(results,  sample_source='result', n_points=20)
+        _.set_title(f'{current_property}')
         plt.savefig(f"objective_{current_property}_.png")
