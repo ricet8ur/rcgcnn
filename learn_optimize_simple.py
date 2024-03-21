@@ -117,15 +117,15 @@ fields = [
 reference_csv = {
     "mp-ids-3402.csv": [
         "k_voigt",
-        "k_reuss",
-        "k_vrh",
+        # "k_reuss",
+        # "k_vrh",
         "g_voigt",
-        "g_reuss",
-        "g_vrh",
+        # "g_reuss",
+        # "g_vrh",
         "homogeneous_poisson",
     ],
-    "mp-ids-46744.csv": ["energy_per_atom", "formation_energy_per_atom", "efermi"],
     "mp-ids-27430.csv": ["band_gap"],
+    "mp-ids-46744.csv": ["energy_per_atom", "formation_energy_per_atom", "efermi"],
 }
 
 def load_properties_from_bin(file):
@@ -140,7 +140,7 @@ t2m = load_properties_from_bin(t2m_file)
 full_df = pd.read_csv("./scripts/non_ill_df.csv",index_col=0)
 
 full_df = pd.DataFrame(load_properties_from_bin('./data/root/data/props.bin')).transpose()
-# print(full_df.head(800))
+print(full_df.head(200))
 
 for moduli in ["k_voigt", "k_reuss", "k_vrh", "g_voigt", "g_reuss", "g_vrh"]:
     full_df[moduli] = np.log(full_df[moduli])
@@ -166,7 +166,9 @@ def get_df_for_csv(csv:str):
 
 def set_property_to_ids(df: pd.DataFrame, prop: str):
     part_df = df[prop].dropna()
+    print(prop,part_df.describe())
     part_df = part_df.groupby(part_df.index).first()
+    print(prop,part_df.describe())
     part_df.to_csv("./data/root/data/id_prop.csv", index=True, header=False)
 
 
@@ -180,6 +182,9 @@ current_property = prop
 df = get_df_for_csv('mp-ids-27430.csv')
 print(df.describe())
 set_property_to_ids(df, prop)
+
+free_cache = False
+
 SPACE = [
     space.Integer(1,6, name='n_conv', prior='uniform'),
     space.Integer(10, 200, name='atom_fea_len',prior='uniform'),
@@ -187,6 +192,7 @@ SPACE = [
     space.Integer(1, 6, name='n_h'),]
 @skopt.utils.use_named_args(SPACE)
 def objective(**params):
+    global free_cache
     tmp = {
 'n_conv':int(params['n_conv']),
 'atom_fea_len':int(params['atom_fea_len']),
@@ -202,7 +208,8 @@ def objective(**params):
     args.n_h =params['n_h']
     oom = False
     try:
-        res =  main.main(args= args,torch_generator=1)
+        res =  main.main(args= args,free_cache=free_cache,torch_generator=1)
+        free_cache=False
         st.move("checkpoint.pth.tar", "./trained/" + prop + "_check.pth.tar")
         st.move("model_best.pth.tar", "./trained/" + prop + "_best.pth.tar")
         st.move("test_results.csv", "./trained/" + prop + "_results.csv")
@@ -238,7 +245,7 @@ for k,v in reference_csv.items():
         df = get_df_for_csv(k)
         print(df.describe())
         set_property_to_ids(df, prop)
-
+        free_cache = True
         results = skopt.gp_minimize(objective, SPACE, n_calls=n_calls, n_initial_points=1,x0=[[i.high for i in SPACE]])
         # with open(f"optHP_bestmae_{current_property}_log.json", "w") as f:
             # json.dump(best_mae, f)

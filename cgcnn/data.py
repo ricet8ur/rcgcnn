@@ -437,7 +437,8 @@ class CIFData(Dataset):
     cif_id: str or int
     """
     def __init__(self, root_dir, max_num_nbr=12, radius=8, dmin=0, step=0.2,
-                 random_seed=123):
+                 random_seed=123, free_cache=False):
+        global CifData_global_cache
         self.root_dir = root_dir
         self.max_num_nbr, self.radius = max_num_nbr, radius
         assert os.path.exists(root_dir), 'root_dir does not exist!'
@@ -471,6 +472,8 @@ class CIFData(Dataset):
         self.ari = AtomCustomJSONInitializer(atom_init_file)
         self.gdf = GaussianDistance(dmin=dmin, dmax=self.radius, step=step)
         # load all cifs from 'cifs.bin', which contains cif file for each possible mp-id
+        if free_cache:
+            CifData_global_cache = {}
         if len(CifData_global_cache) == 0:
             import msgpack as mp
             if not hasattr(self,'cifs'):
@@ -478,7 +481,6 @@ class CIFData(Dataset):
                     self.cifs = mp.unpackb(f.read())
                 for i in range(len(self.idx_sequence)):
                     self[i]
-
     def __len__(self):
         return len(self.idx_sequence)
 

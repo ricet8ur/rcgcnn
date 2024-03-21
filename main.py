@@ -98,7 +98,10 @@ def main(**kwargs):
             best_mae_error = 0.
         args = kwargs['args']
         # print('args:',args)
-        dataset = CIFData(*args.data_options)
+        if 'free_cache' in kwargs:
+            dataset = CIFData(*args.data_options, free_cache=kwargs['free_cache'])
+        else:
+            dataset = CIFData(*args.data_options)
     else:
     # print(args.data_options)
         dataset = CIFData(*args.data_options)
