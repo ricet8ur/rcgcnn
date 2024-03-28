@@ -523,6 +523,6 @@ def adjust_learning_rate(optimizer, epoch, k):
 if __name__ == '__main__':
     import time
     a = time.time()
-    print(time.time()-a)
+    # print(time.time()-a)
     main()
-    print(time.time()-a)
+    # print(time.time()-a)
