@@ -1,0 +1,13 @@
+# torch torchvision --index-url https://download.pytorch.org/whl/cu118
+ipykernel 
+pymatgen==2023.10.4 
+mp-api 
+scikit-learn 
+ormsgpack 
+msgpack 
+zstandard 
+# pyflame 
+# matplotlib-venn 
+numba 
+# mpcontribs-client 
+scikit-optimize
