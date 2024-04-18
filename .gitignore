@@ -99,7 +99,11 @@ Local
 **/*.cif
 **/props
 # large files
+**/cifs.json
+**/props.json
+
 **/*.bin
 # t2m
-!data/root/data/t2m.bin
+**/t2m.json
+# !data/root/data/t2m.json
 **/mp.2018.6.1.json*
