@@ -77,6 +77,10 @@ parser.add_argument('--n-conv', default=3, type=int, metavar='N',
                     help='number of conv layers')
 parser.add_argument('--n-h', default=1, type=int, metavar='N',
                     help='number of hidden layers after pooling')
+parser.add_argument('--use-clearml', default=False, type=bool, metavar='N',
+                    help='use clearml to save train and test info')
+parser.add_argument('--free-cache', default=True, type=bool, metavar='N',
+                    help='manually free CifData cache')
 args = parser.parse_args(sys.argv[1:])
 
 args.cuda = not args.disable_cuda and torch.cuda.is_available()
@@ -98,13 +102,9 @@ def main(**kwargs):
             best_mae_error = 0.
         args = kwargs['args']
         # print('args:',args)
-        if 'free_cache' in kwargs:
-            dataset = CIFData(*args.data_options, free_cache=kwargs['free_cache'])
-        else:
-            dataset = CIFData(*args.data_options)
-    else:
-    # print(args.data_options)
-        dataset = CIFData(*args.data_options)
+    if 'free_cache' in kwargs:
+        args.free_cache = kwargs['free_cache']
+    dataset = CIFData(*args.data_options, free_cache=args.free_cache)
     collate_fn = collate_pool
     train_loader, val_loader, test_loader = get_train_val_test_loader(
         dataset=dataset,
@@ -120,13 +120,14 @@ def main(**kwargs):
         test_size=args.test_size,
         return_test=True,
         **kwargs)
+    
+    print(len(dataset))
 
     # obtain target value normalizer
     if args.task == 'classification':
         normalizer = Normalizer(torch.zeros(2))
         normalizer.load_state_dict({'mean': 0., 'std': 1.})
     else:
-        print(len(dataset))
         if len(dataset) < 500:
             warnings.warn('Dataset has less than 500 data points. '
                           'Lower accuracy is expected. ')
@@ -189,7 +190,7 @@ def main(**kwargs):
         train(train_loader, model, criterion, optimizer, epoch, normalizer)
 
         # evaluate on validation set
-        mae_error = validate(val_loader, model, criterion, normalizer)
+        mae_error = validate(val_loader, model, criterion, epoch,normalizer)
 
         if mae_error != mae_error:
             print('Exit due to NaN')
@@ -217,7 +218,7 @@ def main(**kwargs):
     print('---------Evaluate Model on Test Set---------------')
     best_checkpoint = torch.load('model_best.pth.tar')
     model.load_state_dict(best_checkpoint['state_dict'])
-    return validate(test_loader, model, criterion, normalizer, test=True)
+    return validate(test_loader, model, criterion, epoch,normalizer, test=True)
     
 
 def train(train_loader, model, criterion, optimizer, epoch, normalizer):
@@ -299,6 +300,21 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
                     epoch, i, len(train_loader), batch_time=batch_time,
                     data_time=data_time, loss=losses, mae_errors=mae_errors)
                 )
+
+                if 'use_clearml' in args:
+                    from clearml import Logger
+                    Logger.current_logger().report_scalar(
+                        "Time", "Train", iteration=epoch, value=float(batch_time.val)
+                    )
+                    Logger.current_logger().report_scalar(
+                        "data_time", "Train", iteration=epoch, value=float(data_time.val)
+                    )
+                    Logger.current_logger().report_scalar(
+                        "Loss", "Train", iteration=epoch, value=float(losses.val)
+                    )
+                    Logger.current_logger().report_scalar(
+                        "MAE", "Train", iteration=epoch, value=float(mae_errors.val)
+                    )
             else:
                 print('Epoch: [{0}][{1}/{2}]\t'
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
@@ -316,7 +332,7 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
                 )
 
 
-def validate(val_loader, model, criterion, normalizer, test=False):
+def validate(val_loader, model, criterion, epoch,normalizer, test=False):
     batch_time = AverageMeter()
     losses = AverageMeter()
     if args.task == 'regression':
@@ -404,6 +420,17 @@ def validate(val_loader, model, criterion, normalizer, test=False):
                       'MAE {mae_errors.val:.3f} ({mae_errors.avg:.3f})'.format(
                     i, len(val_loader), batch_time=batch_time, loss=losses,
                     mae_errors=mae_errors))
+                if 'use_clearml' in args:
+                    from clearml import Logger
+                    Logger.current_logger().report_scalar(
+                        "Time", "Test", iteration=epoch, value=float(batch_time.val)
+                    )
+                    Logger.current_logger().report_scalar(
+                        "Loss", "Test", iteration=epoch, value=float(losses.val)
+                    )
+                    Logger.current_logger().report_scalar(
+                        "MAE", "Test", iteration=epoch, value=float(mae_errors.val)
+                    )
             else:
                 print('Test: [{0}/{1}]\t'
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
