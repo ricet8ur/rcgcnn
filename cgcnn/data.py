@@ -475,10 +475,10 @@ class CIFData(Dataset):
         if free_cache:
             CifData_global_cache = {}
         if len(CifData_global_cache) == 0:
-            import msgpack as mp
+            import orjson as json
             if not hasattr(self,'cifs'):
-                with open(os.path.join(self.root_dir,'cifs.bin'),'rb') as f:
-                    self.cifs = mp.unpackb(f.read())
+                with open(os.path.join(self.root_dir,'cifs.json'),'rb') as f:
+                    self.cifs = json.loads(f.read())
                 for i in range(len(self.idx_sequence)):
                     self[i]
     def __len__(self):
@@ -491,9 +491,9 @@ class CIFData(Dataset):
         if mid not in CifData_global_cache:
             cif_id, target = self.mid2target[mid]
             if not hasattr(self,'cifs'):
-                import msgpack as mp
-                with open(os.path.join(self.root_dir,'cifs.bin'),'rb') as f:
-                    self.cifs = mp.unpackb(f.read())
+                import orjson as json
+                with open(os.path.join(self.root_dir,'cifs.json'),'rb') as f:
+                    self.cifs = json.loads(f.read())
             crystal = Structure.from_dict(self.cifs[cif_id])
             atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
                                   for i in range(len(crystal))])
