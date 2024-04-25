@@ -304,16 +304,16 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
                 if 'use_clearml' in args:
                     from clearml import Logger
                     Logger.current_logger().report_scalar(
-                        "Time", "Train", iteration=epoch, value=float(batch_time.val)
+                        "Time", "Train", iteration=epoch, value=float(batch_time.avg)
                     )
                     Logger.current_logger().report_scalar(
-                        "data_time", "Train", iteration=epoch, value=float(data_time.val)
+                        "data_time", "Train", iteration=epoch, value=float(data_time.avg)
                     )
                     Logger.current_logger().report_scalar(
-                        "Loss", "Train", iteration=epoch, value=float(losses.val)
+                        "Loss", "Train", iteration=epoch, value=float(losses.avg)
                     )
                     Logger.current_logger().report_scalar(
-                        "MAE", "Train", iteration=epoch, value=float(mae_errors.val)
+                        "MAE", "Train", iteration=epoch, value=float(mae_errors.avg)
                     )
             else:
                 print('Epoch: [{0}][{1}/{2}]\t'
@@ -423,13 +423,13 @@ def validate(val_loader, model, criterion, epoch,normalizer, test=False):
                 if 'use_clearml' in args:
                     from clearml import Logger
                     Logger.current_logger().report_scalar(
-                        "Time", "Test", iteration=epoch, value=float(batch_time.val)
+                        "Time", "Test", iteration=epoch, value=float(batch_time.avg)
                     )
                     Logger.current_logger().report_scalar(
-                        "Loss", "Test", iteration=epoch, value=float(losses.val)
+                        "Loss", "Test", iteration=epoch, value=float(losses.avg)
                     )
                     Logger.current_logger().report_scalar(
-                        "MAE", "Test", iteration=epoch, value=float(mae_errors.val)
+                        "MAE", "Test", iteration=epoch, value=float(mae_errors.avg)
                     )
             else:
                 print('Test: [{0}/{1}]\t'
