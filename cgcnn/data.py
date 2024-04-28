@@ -270,7 +270,6 @@ class AtomCustomJSONInitializer(AtomInitializer):
             self._embedding[key] = np.array(value, dtype=float)
 
 
-
 # inner pymatgen core functions reimplementation
 from pymatgen.core.sites import PeriodicSite, Site
 from collections.abc import Iterable, Iterator, Sequence
@@ -365,12 +364,7 @@ def get_all_neighbors(
         neighbors.append(neighbor_dict[i])
     return neighbors 
 
-
-# @functools.lru_cache(maxsize=20000)  # Cache loaded structures
-# def cached_getitem(self, mid):
-#     pass
-CifData_global_cache = {}
-
+import multiprocessing
 class CIFData(Dataset):
     """
     The CIFData dataset is a wrapper for a dataset where the crystal structures
@@ -420,8 +414,8 @@ class CIFData(Dataset):
     cif_id: str or int
     """
     def __init__(self, root_dir, max_num_nbr=12, radius=8, dmin=0, step=0.2,
-                 random_seed=123, free_cache=False):
-        global CifData_global_cache
+                 random_seed=123, max_cache_size=80000):
+
         self.root_dir = root_dir
         self.max_num_nbr, self.radius = max_num_nbr, radius
         assert os.path.exists(root_dir), 'root_dir does not exist!'
@@ -445,7 +439,7 @@ class CIFData(Dataset):
         self.idx_sequence = []
         for idx, mid in enumerate(sorted(mp_ids_list)):
             self.idx2mid[idx]=mid
-        
+
         self.idx_sequence=[idx for idx in range(len(self.id_prop_data))]
         # instead of self.id_prop_data operate on suffled idx_sequence=[idx1,idx2,idx3]
         random.seed(random_seed)
@@ -454,29 +448,50 @@ class CIFData(Dataset):
         assert os.path.exists(atom_init_file), 'atom_init.json does not exist!'
         self.ari = AtomCustomJSONInitializer(atom_init_file)
         self.gdf = GaussianDistance(dmin=dmin, dmax=self.radius, step=step)
-        # load all cifs from 'cifs.bin', which contains cif file for each possible mp-id
-        if free_cache:
-            CifData_global_cache = {}
-        if len(CifData_global_cache) == 0:
-            import orjson as json
-            if not hasattr(self,'cifs'):
-                with open(os.path.join(self.root_dir,'cifs.json'),'rb') as f:
-                    self.cifs = json.loads(f.read())
-                for i in range(len(self.idx_sequence)):
-                    self[i]
+        # caching
+        self.manager = multiprocessing.Manager()
+        self.max_cache_size=max_cache_size
+        self.rlock = self.manager.RLock()
+        # if self.shared_dict is None:
+        #     print('error: shared_dict is None')
+        import orjson as json
+        with open(os.path.join(self.root_dir,'cifs.json'),'rb') as f:
+            # load all cifs from 'cifs.json', which contains cif file for each possible mp-id
+            self.cifs = self.manager.dict([(k,v) for k,v in json.loads(f.read()).items()])
+        self.shared_dict = self.manager.dict()
+        # self.shared_cache = manager.dict()
+        # simple cache that support DataLoader with multiple workers
+        # + using fix from https://discuss.pytorch.org/t/pytorch-cannot-allocate-memory/134754/19 
+        # and https://latentwalk.io/2023/08/19/torch-shmem/
+
     def __len__(self):
         return len(self.idx_sequence)
 
+    # @functools.lru_cache(maxsize=100000)  # Cache loaded structures - does not use multiprocessing 
+    # - unable to use multiple workers:
+    # https://stackoverflow.com/questions/43495986/combining-functools-lru-cache-with-multiprocessing-pool
 
-    # @functools.lru_cache(maxsize=20000)  # Cache loaded structures
+    # @my_lru_cache(maxsize=50000)
     def __getitem__(self, idx):
+        # if len(self.cifs) == self.__getitem__.cache_info()[2]:
+            # able to cache all features, so can free cifs
+            # del self.cifs
+            # pass
         mid = self.idx2mid[self.idx_sequence[idx]]
-        if mid not in CifData_global_cache:
+        to_calculate=True
+        with self.rlock:
+            if mid in self.shared_dict:
+                to_calculate = False
+        
+        if to_calculate: 
+        # if len(self.shared_dict) > len(self.cifs):
+            #     # pop random feature from cache to keep its size constant
+            #     amount_to_pop = 10
+            #     for random_idx in np.random.choice(list(self.cifs.keys()), amount_to_pop):
+            #         if random_idx in self.shared_dict:
+            #             self.shared_dict.pop(random_idx)
+
             cif_id, target = self.mid2target[mid]
-            if not hasattr(self,'cifs'):
-                import orjson as json
-                with open(os.path.join(self.root_dir,'cifs.json'),'rb') as f:
-                    self.cifs = json.loads(f.read())
             crystal = Structure.from_dict(self.cifs[cif_id])
             atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
                                   for i in range(len(crystal))])
@@ -505,5 +520,7 @@ class CIFData(Dataset):
             nbr_fea = torch.Tensor(nbr_fea)
             nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
             target = torch.Tensor([float(target)])
-            CifData_global_cache[mid] = ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id)
-        return CifData_global_cache[mid]
+            data = ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id)
+            with self.rlock:
+                self.shared_dict[mid] = data
+        return self.shared_dict[mid]

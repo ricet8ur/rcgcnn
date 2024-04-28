@@ -79,8 +79,8 @@ parser.add_argument('--n-h', default=1, type=int, metavar='N',
                     help='number of hidden layers after pooling')
 parser.add_argument('--use-clearml', default=False, type=bool, metavar='N',
                     help='use clearml to save train and test info')
-parser.add_argument('--free-cache', default=True, type=bool, metavar='N',
-                    help='manually free CifData cache')
+parser.add_argument('--max-cache-size', default=20000, type=int, metavar='N',
+                    help='configure dataset cache size. Maximum performance if max-cache-size > number of items in cifs file')
 args = parser.parse_args(sys.argv[1:])
 
 args.cuda = not args.disable_cuda and torch.cuda.is_available()
@@ -90,21 +90,27 @@ if args.task == 'regression':
 else:
     best_mae_error = 0.
 
-dataset=None
 def main(**kwargs):
-    global args, best_mae_error, dataset
+    global args, best_mae_error
 
-    # load data
+    # essential part of train logic in case of usage from script
+    if args.task == 'regression':
+        best_mae_error = 1e10
+    else:
+        best_mae_error = 0.
+
     if 'args' in kwargs:
-        if args.task == 'regression':
-            best_mae_error = 1e10
-        else:
-            best_mae_error = 0.
         args = kwargs['args']
-        # print('args:',args)
-    if 'free_cache' in kwargs:
-        args.free_cache = kwargs['free_cache']
-    dataset = CIFData(*args.data_options, free_cache=args.free_cache)
+
+    # Init dataset cache
+    # from multiprocessing import Manager
+    # manager = Manager()
+    # # create shared between processes cache of tensors
+    # import multiprocessing
+    # shared_dict = dict()
+    # rlock = multiprocessing.RLock()
+    dataset = CIFData(*args.data_options, max_cache_size=args.max_cache_size)
+
     collate_fn = collate_pool
     train_loader, val_loader, test_loader = get_train_val_test_loader(
         dataset=dataset,
@@ -219,7 +225,7 @@ def main(**kwargs):
     best_checkpoint = torch.load('model_best.pth.tar')
     model.load_state_dict(best_checkpoint['state_dict'])
     return validate(test_loader, model, criterion, epoch,normalizer, test=True)
-    
+
 
 def train(train_loader, model, criterion, optimizer, epoch, normalizer):
     batch_time = AverageMeter()
@@ -239,6 +245,11 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
 
     end = time.time()
     for i, (input, target, _) in enumerate(train_loader):
+        input = tuple(
+            tensor.copy() if type(tensor) is list else tensor.clone()
+            for tensor in input
+        )
+        target = target.clone()
         # measure data loading time
         data_time.update(time.time() - end)
 
