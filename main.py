@@ -80,7 +80,9 @@ parser.add_argument('--n-h', default=1, type=int, metavar='N',
 parser.add_argument('--use-clearml', default=False, type=bool, metavar='N',
                     help='use clearml to save train and test info')
 parser.add_argument('--max-cache-size', default=20000, type=int, metavar='N',
-                    help='configure dataset cache size. Maximum performance if max-cache-size > number of items in cifs file')
+                    help='configure dataset cache size.'
+                     ' Maximum performance if max-cache-size > number of items in cifs file.'
+                     'If facing high RAM usage decrease max-cache-size' )
 args = parser.parse_args(sys.argv[1:])
 
 args.cuda = not args.disable_cuda and torch.cuda.is_available()
@@ -102,14 +104,11 @@ def main(**kwargs):
     if 'args' in kwargs:
         args = kwargs['args']
 
-    # Init dataset cache
-    # from multiprocessing import Manager
-    # manager = Manager()
-    # # create shared between processes cache of tensors
-    # import multiprocessing
-    # shared_dict = dict()
-    # rlock = multiprocessing.RLock()
-    dataset = CIFData(*args.data_options, max_cache_size=args.max_cache_size)
+    # support dataset.cache sharing across main calls:
+    if 'cache' in kwargs:
+        dataset = CIFData(*args.data_options, max_cache_size=args.max_cache_size ,num_workers=args.workers, cache=kwargs['cache'])
+    else:
+        dataset = CIFData(*args.data_options, max_cache_size=args.max_cache_size ,num_workers=args.workers)
 
     collate_fn = collate_pool
     train_loader, val_loader, test_loader = get_train_val_test_loader(
@@ -117,7 +116,7 @@ def main(**kwargs):
         collate_fn=collate_fn,
         batch_size=args.batch_size,
         train_ratio=args.train_ratio,
-        num_workers=args.workers,
+        num_workers=args.workers, 
         val_ratio=args.val_ratio,
         test_ratio=args.test_ratio,
         pin_memory=args.cuda,

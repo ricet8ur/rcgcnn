@@ -364,7 +364,6 @@ def get_all_neighbors(
         neighbors.append(neighbor_dict[i])
     return neighbors 
 
-import multiprocessing
 class CIFData(Dataset):
     """
     The CIFData dataset is a wrapper for a dataset where the crystal structures
@@ -413,114 +412,152 @@ class CIFData(Dataset):
     target: torch.Tensor shape (1, )
     cif_id: str or int
     """
-    def __init__(self, root_dir, max_num_nbr=12, radius=8, dmin=0, step=0.2,
-                 random_seed=123, max_cache_size=80000):
-
+    def __init__(
+        self,
+        root_dir,
+        max_num_nbr=12,
+        radius=8,
+        dmin=0,
+        step=0.2,
+        random_seed=123,
+        max_cache_size=20000,
+        num_workers=0,
+        cache=None,
+    ):
         self.root_dir = root_dir
         self.max_num_nbr, self.radius = max_num_nbr, radius
-        assert os.path.exists(root_dir), 'root_dir does not exist!'
-        id_prop_file = os.path.join(self.root_dir, 'id_prop.csv')
-        assert os.path.exists(id_prop_file), 'id_prop.csv does not exist!'
+        assert os.path.exists(root_dir), "root_dir does not exist!"
+        id_prop_file = os.path.join(self.root_dir, "id_prop.csv")
+        assert os.path.exists(id_prop_file), "id_prop.csv does not exist!"
         with open(id_prop_file) as f:
             reader = csv.reader(f)
             self.id_prop_data = [row for row in reader]
         # create new bijective map between mp-id and index
         # based on sorted indexes of mp-ids for the given main() call
         # print('p',self.id_prop_data)
-        self.idx2mid = dict()
-        self.mid2target = dict() # aka new self.id_prop_data with mp_id index instead of random index
+        self.idx2cif_id = dict()
+        self.cif_id2target = (
+            dict()
+        )  # aka new self.id_prop_data with mp_id index instead of random index
         mp_ids_list = []
         for idx in range(len(self.id_prop_data)):
             cif_id, target = self.id_prop_data[idx]
-            mid = int(cif_id[3:])
-            mp_ids_list.append(mid)
-            self.mid2target[mid] = (cif_id,target)
+            mp_ids_list.append(cif_id)
+            self.cif_id2target[cif_id] = target
 
         self.idx_sequence = []
-        for idx, mid in enumerate(sorted(mp_ids_list)):
-            self.idx2mid[idx]=mid
+        for idx, cif_id in enumerate(sorted(mp_ids_list)):
+            self.idx2cif_id[idx] = cif_id
 
-        self.idx_sequence=[idx for idx in range(len(self.id_prop_data))]
+        self.idx_sequence = [idx for idx in range(len(self.id_prop_data))]
         # instead of self.id_prop_data operate on suffled idx_sequence=[idx1,idx2,idx3]
         random.seed(random_seed)
         random.shuffle(self.idx_sequence)
-        atom_init_file = os.path.join(self.root_dir, 'atom_init.json')
-        assert os.path.exists(atom_init_file), 'atom_init.json does not exist!'
+        atom_init_file = os.path.join(self.root_dir, "atom_init.json")
+        assert os.path.exists(atom_init_file), "atom_init.json does not exist!"
         self.ari = AtomCustomJSONInitializer(atom_init_file)
         self.gdf = GaussianDistance(dmin=dmin, dmax=self.radius, step=step)
         # caching
-        self.manager = multiprocessing.Manager()
-        self.max_cache_size=max_cache_size
-        self.rlock = self.manager.RLock()
-        # if self.shared_dict is None:
-        #     print('error: shared_dict is None')
-        import orjson as json
-        with open(os.path.join(self.root_dir,'cifs.json'),'rb') as f:
-            # load all cifs from 'cifs.json', which contains cif file for each possible mp-id
-            self.cifs = self.manager.dict([(k,v) for k,v in json.loads(f.read()).items()])
-        self.shared_dict = self.manager.dict()
-        # self.shared_cache = manager.dict()
-        # simple cache that support DataLoader with multiple workers
-        # + using fix from https://discuss.pytorch.org/t/pytorch-cannot-allocate-memory/134754/19 
-        # and https://latentwalk.io/2023/08/19/torch-shmem/
+        if cache is not None:
+            # reuse and save time
+            # make sure to provide precomputed cache only for the same hyperparameters:
+            # root_dir, max_num_nbr, radius, dmin, step
+            # print(len(cache), " using cache")
+            self.cache = cache
+        else:
+            self.cache = dict()
+            self.max_cache_size = max_cache_size
+            import orjson as json
+            from pathlib import Path
+
+            path = os.path.join(self.root_dir, "cifs.json")
+            if Path(path).exists():
+                if num_workers == 0:
+                    # don't support multiprocessing
+                    with open(path, "rb") as f:
+                        # load all cifs from 'cifs.json', which contains cif file for each possible mp-id
+                        cifs = json.loads(f.read())
+                        if len(self.idx_sequence) < self.max_cache_size:
+                            # fits into cache
+                            self.problematic_cif_ids = []
+                            for cif_id in cifs.keys():
+                                if self.populate_cache(cif_id, cifs):
+                                    self.problematic_cif_ids.append(cif_id)
+                            del cifs
+                else:
+                    # support multiprocessing
+                    import multiprocessing
+
+                    manager = multiprocessing.Manager()
+                    with open(path, "rb") as f:
+                        # avoid copy-on-read with shared dict
+                        self.cifs = manager.dict(
+                            [(k, v) for k, v in json.loads(f.read()).items()]
+                        )
+            else:
+                # can read individual CIF files later
+                self.cifs = None
 
     def __len__(self):
         return len(self.idx_sequence)
 
-    # @functools.lru_cache(maxsize=100000)  # Cache loaded structures - does not use multiprocessing 
-    # - unable to use multiple workers:
-    # https://stackoverflow.com/questions/43495986/combining-functools-lru-cache-with-multiprocessing-pool
+    def populate_cache(self, cif_id, cifs=None):
+        # can use local cifs, self.cifs or None in case of individual CIF files
 
-    # @my_lru_cache(maxsize=50000)
+        if len(self.cache) > self.max_cache_size:
+            # pop random feature from cache to keep its size constant
+            amount_to_pop = 10
+            for random_idx in np.random.choice(list(self.cache.keys()), amount_to_pop):
+                if random_idx in self.cache:
+                    self.cache.pop(random_idx)
+
+        if cifs is None:
+            crystal = Structure.from_file(os.path.join(self.root_dir, cif_id + ".cif"))
+        else:
+            crystal = Structure.from_dict(cifs[cif_id])
+        atom_fea = np.vstack(
+            [
+                self.ari.get_atom_fea(crystal[i].specie.number)
+                for i in range(len(crystal))
+            ]
+        )
+        atom_fea = torch.Tensor(atom_fea)
+        all_nbrs = get_all_neighbors(crystal, self.radius, include_index=True)
+        all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
+        nbr_fea_idx, nbr_fea = [], []
+        is_not_enough_neighbors = False
+        for nbr in all_nbrs:
+            if len(nbr) < self.max_num_nbr:
+                warnings.warn(
+                    "{} not find enough neighbors to build graph. "
+                    "If it happens frequently, consider increase "
+                    "radius.".format(cif_id)
+                )
+                nbr_fea_idx.append(
+                    list(map(lambda x: x[2], nbr)) + [0] * (self.max_num_nbr - len(nbr))
+                )
+                nbr_fea.append(
+                    list(map(lambda x: x[1], nbr))
+                    + [self.radius + 1.0] * (self.max_num_nbr - len(nbr))
+                )
+                is_not_enough_neighbors = True
+            else:
+                nbr_fea_idx.append(list(map(lambda x: x[2], nbr[: self.max_num_nbr])))
+                nbr_fea.append(list(map(lambda x: x[1], nbr[: self.max_num_nbr])))
+        nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
+        nbr_fea = self.gdf.expand(nbr_fea)
+        atom_fea = torch.Tensor(atom_fea)
+        nbr_fea = torch.Tensor(nbr_fea)
+        nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
+        self.cache[cif_id] = (atom_fea, nbr_fea, nbr_fea_idx)
+        return is_not_enough_neighbors
+
+    # @functools.lru_cache(maxsize=20000) #- does not support multiprocessing and arbitrary self.max_cache_size
     def __getitem__(self, idx):
-        # if len(self.cifs) == self.__getitem__.cache_info()[2]:
-            # able to cache all features, so can free cifs
-            # del self.cifs
-            # pass
-        mid = self.idx2mid[self.idx_sequence[idx]]
-        to_calculate=True
-        with self.rlock:
-            if mid in self.shared_dict:
-                to_calculate = False
-        
-        if to_calculate: 
-        # if len(self.shared_dict) > len(self.cifs):
-            #     # pop random feature from cache to keep its size constant
-            #     amount_to_pop = 10
-            #     for random_idx in np.random.choice(list(self.cifs.keys()), amount_to_pop):
-            #         if random_idx in self.shared_dict:
-            #             self.shared_dict.pop(random_idx)
-
-            cif_id, target = self.mid2target[mid]
-            crystal = Structure.from_dict(self.cifs[cif_id])
-            atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
-                                  for i in range(len(crystal))])
-            atom_fea = torch.Tensor(atom_fea)
-            all_nbrs = get_all_neighbors(crystal, self.radius, include_index=True)
-            all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
-            nbr_fea_idx, nbr_fea = [], []
-            for nbr in all_nbrs:
-                if len(nbr) < self.max_num_nbr:
-                    warnings.warn('{} not find enough neighbors to build graph. '
-                                  'If it happens frequently, consider increase '
-                                  'radius.'.format(cif_id))
-                    nbr_fea_idx.append(list(map(lambda x: x[2], nbr)) +
-                                       [0] * (self.max_num_nbr - len(nbr)))
-                    nbr_fea.append(list(map(lambda x: x[1], nbr)) +
-                                   [self.radius + 1.] * (self.max_num_nbr -
-                                                         len(nbr)))
-                else:
-                    nbr_fea_idx.append(list(map(lambda x: x[2],
-                                                nbr[:self.max_num_nbr])))
-                    nbr_fea.append(list(map(lambda x: x[1],
-                                            nbr[:self.max_num_nbr])))
-            nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
-            nbr_fea = self.gdf.expand(nbr_fea)
-            atom_fea = torch.Tensor(atom_fea)
-            nbr_fea = torch.Tensor(nbr_fea)
-            nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
-            target = torch.Tensor([float(target)])
-            data = ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id)
-            with self.rlock:
-                self.shared_dict[mid] = data
-        return self.shared_dict[mid]
+        cif_id = self.idx2cif_id[self.idx_sequence[idx]]
+        target = self.cif_id2target[cif_id]
+        if cif_id not in self.cache:
+            print("not found", cif_id, "in cache", list(self.cache.keys())[:2])
+            self.populate_cache(cif_id, self.cifs)
+        target = torch.Tensor([float(target)])
+        return (self.cache[cif_id], target, cif_id)
