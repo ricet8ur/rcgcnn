@@ -15,6 +15,7 @@ from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR
 
 from cgcnn.data import CIFData
+from cgcnn.data import CIFData_original
 from cgcnn.data import collate_pool, get_train_val_test_loader
 from cgcnn.model import CrystalGraphConvNet
 
@@ -83,6 +84,10 @@ parser.add_argument('--max-cache-size', default=20000, type=int, metavar='N',
                     help='configure dataset cache size.'
                      ' Maximum performance if max-cache-size > number of items in cifs file.'
                      'If facing high RAM usage decrease max-cache-size' )
+parser.add_argument('--use-original-cifdata-loader', default=False, type=bool, metavar='N',
+                    help='Turn CIFData modifications off')
+parser.add_argument('--k-fold-cross-validation', default=0, type=int, metavar='N',
+                    help='Use sklearn KFold (default: not used)')
 args = parser.parse_args(sys.argv[1:])
 
 args.cuda = not args.disable_cuda and torch.cuda.is_available()
@@ -105,10 +110,15 @@ def main(**kwargs):
         args = kwargs['args']
 
     # support dataset.cache sharing across main calls:
-    if 'cache' in kwargs:
-        dataset = CIFData(*args.data_options, max_cache_size=args.max_cache_size ,num_workers=args.workers, cache=kwargs['cache'])
+    if args.use_original_cifdata_loader:
+        dataset = CIFData_original(*args.data_options)
     else:
-        dataset = CIFData(*args.data_options, max_cache_size=args.max_cache_size ,num_workers=args.workers)
+        dataset = CIFData(
+            *args.data_options,
+            max_cache_size=args.max_cache_size,
+            num_workers=args.workers,
+            cache=kwargs["cache"] if "cache" in kwargs else None
+        )
 
     collate_fn = collate_pool
     train_loader, val_loader, test_loader = get_train_val_test_loader(
@@ -125,7 +135,7 @@ def main(**kwargs):
         test_size=args.test_size,
         return_test=True,
         **kwargs)
-    
+
     print(len(dataset))
 
     # obtain target value normalizer
