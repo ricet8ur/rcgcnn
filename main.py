@@ -235,6 +235,49 @@ def main(**kwargs):
     model.load_state_dict(best_checkpoint['state_dict'])
     return validate(test_loader, model, criterion, epoch,normalizer, test=True)
 
+def k_fold_main(**kwargs):
+    global args, best_mae_error
+
+    if args.task == 'regression':
+        best_mae_error = 1e10
+    else:
+        best_mae_error = 0.
+
+    if 'args' in kwargs:
+        args = kwargs['args']
+
+    # support dataset.cache sharing across main calls:
+    if args.use_original_cifdata_loader:
+        dataset = CIFData_original(*args.data_options)
+    else:
+        dataset = CIFData(
+            *args.data_options,
+            max_cache_size=args.max_cache_size,
+            num_workers=args.workers,
+            cache=kwargs["cache"] if "cache" in kwargs else None
+        )
+    maes = dict()
+    if args.k_fold_cross_validation > 0:
+        indices = list(range(len(dataset)))
+        from sklearn.model_selection import KFold
+        kfold = KFold(n_splits = args.k_fold_cross_validation, shuffle=True, random_state = 42)
+        for fold, (train_val_ids, test_ids) in enumerate(kfold.split(indices)):
+            print(f'FOLD {fold}')
+            kfold2 = KFold(n_splits=args.k_fold_cross_validation-1, shuffle=True, random_state = 42)
+            for fold2, (train_ids,val_ids) in enumerate(kfold2.split(train_val_ids)):
+                mae_fold = main(k_fold=(train_ids, val_ids, test_ids),**kwargs)
+                maes[fold]=float(mae_fold)
+                if 'use_clearml' in args:
+                    from clearml import Logger
+                    Logger.current_logger().report_scalar(
+                        "MAE for fold", "MAE", iteration=fold, value=float(mae_fold)
+                    )
+                break
+    if 'use_clearml' in args:
+        from clearml import Task
+        Task.current_task().connect(maes, name="k_fold_maes")
+
+    return np.mean(maes)
 
 def train(train_loader, model, criterion, optimizer, epoch, normalizer):
     batch_time = AverageMeter()

@@ -86,11 +86,18 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
         # torch.cuda.manual_seed_all(42)
     else:
         g=None
-    train_sampler = SubsetRandomSampler(indices[:train_size],g)
-    val_sampler = SubsetRandomSampler(
-        indices[-(valid_size + test_size):-test_size],g)
-    if return_test:
-        test_sampler = SubsetRandomSampler(indices[-test_size:],g)
+    if 'k_fold' in kwargs:
+        (train_ids, val_ids, test_ids) = kwargs['k_fold']
+        train_sampler = SubsetRandomSampler(train_ids, g)
+        val_sampler = SubsetRandomSampler(val_ids, g)
+        if return_test:
+            test_sampler = SubsetRandomSampler(test_ids,g)
+    else:
+        train_sampler = SubsetRandomSampler(indices[:train_size],g)
+        val_sampler = SubsetRandomSampler(
+            indices[-(valid_size + test_size):-test_size],g)
+        if return_test:
+            test_sampler = SubsetRandomSampler(indices[-test_size:],g)
     train_loader = DataLoader(dataset, batch_size=batch_size,
                               sampler=train_sampler,
                               num_workers=num_workers,
@@ -108,6 +115,8 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
         return train_loader, val_loader, test_loader
     else:
         return train_loader, val_loader
+
+
 
 
 def collate_pool(dataset_list):
@@ -426,6 +435,8 @@ class CIFData(Dataset):
         cache=None,
     ):
         self.root_dir = root_dir
+        self.num_workers = num_workers
+        self.max_cache_size = max_cache_size
         self.max_num_nbr, self.radius = max_num_nbr, radius
         assert os.path.exists(root_dir), "root_dir does not exist!"
         id_prop_file = os.path.join(self.root_dir, "id_prop.csv")
@@ -467,37 +478,32 @@ class CIFData(Dataset):
             self.cache = cache
         else:
             self.cache = dict()
-            self.max_cache_size = max_cache_size
-            import orjson as json
-            from pathlib import Path
+            self.add_cifs()
 
-            path = os.path.join(self.root_dir, "cifs.json")
-            if Path(path).exists():
-                if num_workers == 0:
-                    # don't support multiprocessing
-                    with open(path, "rb") as f:
-                        # load all cifs from 'cifs.json', which contains cif file for each possible mp-id
-                        self.cifs = json.loads(f.read())
-                        # if len(self.idx_sequence) < self.max_cache_size:
-                        #     # fits into cache
-                        #     self.problematic_cif_ids = []
-                        #     for cif_id in cifs.keys():
-                        #         if self.populate_cache(cif_id, cifs):
-                        #             self.problematic_cif_ids.append(cif_id)
-                        # del cifs
-                else:
-                    # support multiprocessing
-                    import multiprocessing
+    def add_cifs(self):
+        import orjson as json
+        from pathlib import Path
 
-                    manager = multiprocessing.Manager()
-                    with open(path, "rb") as f:
-                        # avoid copy-on-read with shared dict
-                        self.cifs = manager.dict(
-                            [(k, v) for k, v in json.loads(f.read()).items()]
-                        )
+        path = os.path.join(self.root_dir, "cifs.json")
+        if Path(path).exists():
+            if self.num_workers == 0:
+                # don't support multiprocessing
+                with open(path, "rb") as f:
+                    # load all cifs from 'cifs.json', which contains cif file for each possible mp-id
+                    self.cifs = json.loads(f.read())
             else:
-                # can read individual CIF files later
-                self.cifs = None
+                # support multiprocessing
+                import multiprocessing
+
+                manager = multiprocessing.Manager()
+                with open(path, "rb") as f:
+                    # avoid copy-on-read with shared dict
+                    self.cifs = manager.dict(
+                        [(k, v) for k, v in json.loads(f.read()).items()]
+                    )
+        else:
+            # can read individual CIF files later
+            self.cifs = None
 
     def __len__(self):
         return len(self.idx_sequence)
@@ -573,6 +579,8 @@ class CIFData(Dataset):
         target = self.cif_id2target[cif_id]
         if cif_id not in self.cache:
             # print("not found", cif_id, "in cache", list(self.cache.keys())[:2])
+            if not hasattr(self,'cifs'):
+                self.add_cifs()
             self.populate_cache(cif_id, self.cifs)
         target = torch.Tensor([float(target)])
         return (self.cache[cif_id], target, cif_id)
