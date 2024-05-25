@@ -98,6 +98,7 @@ Local
 # many files
 **/*.cif
 **/props
+**/cif_cache/
 # large files
 **/cifs.json
 **/props.json
@@ -107,3 +108,7 @@ Local
 **/t2m.json
 # !data/root/data/t2m.json
 **/mp.2018.6.1.json*
+
+runs/
+
+trained/

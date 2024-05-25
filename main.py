@@ -258,20 +258,25 @@ def k_fold_main(**kwargs):
         )
     maes = dict()
     if args.k_fold_cross_validation > 0:
+        k = max(args.k_fold_cross_validation, 5)
         indices = list(range(len(dataset)))
         from sklearn.model_selection import KFold
-        kfold = KFold(n_splits = args.k_fold_cross_validation, shuffle=True, random_state = 42)
+
+        kfold = KFold(n_splits=k, shuffle=True, random_state=42)
         for fold, (train_val_ids, test_ids) in enumerate(kfold.split(indices)):
-            print(f'FOLD {fold}')
-            kfold2 = KFold(n_splits=args.k_fold_cross_validation-1, shuffle=True, random_state = 42)
-            for fold2, (train_ids,val_ids) in enumerate(kfold2.split(train_val_ids)):
-                mae_fold = main(k_fold=(train_ids, val_ids, test_ids),**kwargs)
-                maes[fold]=float(mae_fold)
-                if 'use_clearml' in args:
+            print(f"FOLD {fold}")
+            kfold2 = KFold(n_splits=k - 1, shuffle=True, random_state=42)
+            for fold2, (train_ids, val_ids) in enumerate(kfold2.split(train_val_ids)):
+                mae_fold = main(k_fold=(train_ids, val_ids, test_ids), **kwargs)
+                maes[fold] = float(mae_fold)
+                if "use_clearml" in args:
                     from clearml import Logger
+
                     Logger.current_logger().report_scalar(
                         "MAE for fold", "MAE", iteration=fold, value=float(mae_fold)
                     )
+                break
+            if fold >= args.k_fold_cross_validation:
                 break
     if 'use_clearml' in args:
         from clearml import Task
