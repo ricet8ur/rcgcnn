@@ -268,7 +268,7 @@ def k_fold_main(**kwargs):
             kfold2 = KFold(n_splits=k - 1, shuffle=True, random_state=42)
             for fold2, (train_ids, val_ids) in enumerate(kfold2.split(train_val_ids)):
                 mae_fold = main(k_fold=(train_ids, val_ids, test_ids), **kwargs)
-                maes[fold] = float(mae_fold)
+                maes[str(fold)] = float(mae_fold)
                 if "use_clearml" in args:
                     from clearml import Logger
 
@@ -276,13 +276,13 @@ def k_fold_main(**kwargs):
                         "MAE for fold", "MAE", iteration=fold, value=float(mae_fold)
                     )
                 break
-            if fold >= args.k_fold_cross_validation:
+            if fold + 1 >= args.k_fold_cross_validation:
                 break
     if 'use_clearml' in args:
         from clearml import Task
         Task.current_task().connect(maes, name="k_fold_maes")
 
-    return np.mean(maes)
+    return np.mean(list(maes.values()))
 
 def train(train_loader, model, criterion, optimizer, epoch, normalizer):
     batch_time = AverageMeter()
